@@ -981,6 +981,7 @@
     <string name="profiles_empty_subscription">此订阅中还没有配置</string>
     <string name="profiles_empty_subscription_hint">更新订阅以下载其配置。</string>
     <string name="profiles_more_options">更多选项</string>
+    <string name="profiles_other">其他</string>
     <string name="profiles_move_down">下移</string>
     <string name="profiles_move_no_target">没有其他可移动到的基础分组。</string>
     <string name="profiles_move_to_group">移动到分组</string>

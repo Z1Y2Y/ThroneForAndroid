@@ -195,14 +195,23 @@ class TunSettingsFragment : SettingsScreenFragment(R.xml.settings_tun) {
         }
 
         proxyApps = pref(Key.PROXY_APPS)
-        // Only switching it on opens the app list: that screen turns per-app proxy on, so it could never go off here.
+        // Tapping the row opens the app list; the switch widget itself still controls whether per-app proxy is on.
+        proxyApps.setOnPreferenceClickListener {
+            if (!DataStore.proxyApps) DataStore.dirty = true
+            openAppManager()
+            true
+        }
         proxyApps.setOnPreferenceChangeListener { _, newValue ->
             if (newValue as Boolean) {
                 DataStore.dirty = true
-                startActivity(Intent(activity, AppManagerActivity::class.java))
+                openAppManager()
             }
             true
         }
+    }
+
+    private fun openAppManager() {
+        startActivity(Intent(requireContext(), AppManagerActivity::class.java))
     }
 
     override fun onResume() {

@@ -22,7 +22,12 @@ class GroupMenu(private val host: ConfigurationFragment) {
     var sortDescending = false
 
     fun setUp(menu: Menu) {
-        menu.findItem(R.id.action_misc)?.subMenu?.let { MenuCompat.setGroupDividerEnabled(it, true) }
+        menu.findItem(R.id.action_misc)?.subMenu?.let { miscMenu ->
+            MenuCompat.setGroupDividerEnabled(miscMenu, true)
+            miscMenu.findItem(R.id.action_other)?.subMenu?.let { otherMenu ->
+                MenuCompat.setGroupDividerEnabled(otherMenu, true)
+            }
+        }
         keepOpen(menu, R.id.action_sort_ascending) { setDirection(it, false) }
         keepOpen(menu, R.id.action_sort_descending) { setDirection(it, true) }
         keepOpen(menu, R.id.action_show_out_ip) { toggleShown(menu, it) }

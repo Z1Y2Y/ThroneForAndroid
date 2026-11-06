@@ -69,8 +69,19 @@ class AppManagerActivity : ThemedActivity() {
         private val pm: PackageManager, private val appInfo: ApplicationInfo?,
         val packageName: String, val byName: Boolean = false,
     ) {
-        val name: CharSequence = appInfo?.loadLabel(pm) ?: packageName    // cached for sorting
-        val icon: Drawable get() = appInfo?.loadIcon(pm) ?: pm.defaultActivityIcon
+        // Some OEM resource overlays can throw while loading one package's label or icon. Keep that app
+        // selectable by its package name/default icon instead of aborting the whole list load.
+        val name: CharSequence = try {
+            appInfo?.loadLabel(pm) ?: packageName
+        } catch (_: Exception) {
+            packageName
+        } // cached for sorting
+        val icon: Drawable
+            get() = try {
+                appInfo?.loadIcon(pm) ?: pm.defaultActivityIcon
+            } catch (_: Exception) {
+                pm.defaultActivityIcon
+            }
         val uid get() = appInfo?.uid ?: -1
         val sys get() = appInfo != null && (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
         val installed get() = appInfo != null

@@ -1,3 +1,12 @@
+#### 2.0.7
+
+* Rename the app to MyTheone and change its Android package to `com.nb4a.thronef`.
+* Reorganize the profile actions menu.
+* Open the app chooser by tapping the per-app proxy row; the switch still controls the feature.
+* Wrap long text in route-rule cards.
+
+Note: Android treats the new package as a separate app; data from an existing Throne installation is not migrated.
+
 #### 2.0.6
 
 * Add DNS tunnels: DNSTT/VayDNS, MasterDNS/StormDNS and XDNS **1**
