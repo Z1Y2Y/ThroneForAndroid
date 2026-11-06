@@ -296,7 +296,7 @@ data class ProxyEntity(
         fun getIdsByGroup(groupId: Long): List<Long>
 
         /** The group's members in list order without their data. */
-        @Query("SELECT `id`, `gid`, `type`, `name` FROM `profiles` WHERE `gid` = :groupId ORDER BY `user_order`, `id`")
+        @Query("SELECT `id`, `gid`, `type`, `name`, `latency` FROM `profiles` WHERE `gid` = :groupId ORDER BY `user_order`, `id`")
         fun getNamesByGroup(groupId: Long): List<ProfileName>
 
         /** The lowest id whose stored name is [name]. */
@@ -457,6 +457,7 @@ data class ProfileName(
     @ColumnInfo(name = "gid") val groupId: Long,
     @ColumnInfo(name = "type") val type: String,
     @ColumnInfo(name = "name") val name: String?,
+    @ColumnInfo(name = "latency") val latency: Int,
 )
 
 /** A profile's stored position in its group. */

@@ -107,6 +107,7 @@ object SettingsMapper {
             resolveDomainStrategy = DataStore.domainStrategy,
             rulesetMirror = DataStore.rulesetMirror,
             adblockEnable = DataStore.adblockEnable,
+            globalMode = DataStore.globalMode,
             enableDnsRouting = routeDns.enableDnsRouting,
             enableTunRouting = DataStore.enableTunRouting,
             trafficStats = DataStore.enableStats,

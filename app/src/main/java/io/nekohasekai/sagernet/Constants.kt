@@ -40,6 +40,8 @@ object Key {
     const val COMPACT_GROUP_CARDS = "compactGroupCards"
 
     const val PROFILE_DIRTY = "profileDirty"
+    const val HIDE_UNAVAILABLE_PROFILES = "hideUnavailableProfiles"
+    const val GLOBAL_MODE = "globalMode"
     const val PROFILE_ID = "profileId"
     const val PROFILE_GROUP = "profileGroup"
     const val PROFILE_CURRENT = "profileCurrent"

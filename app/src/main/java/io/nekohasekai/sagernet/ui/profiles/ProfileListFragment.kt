@@ -59,6 +59,10 @@ class ProfileListFragment : Fragment(R.layout.layout_profile_list) {
     internal lateinit var adapter: ProfileListAdapter
         private set
 
+    internal fun refreshVisibility() {
+        if (::adapter.isInitialized) adapter.refreshVisibility()
+    }
+
     /** The view's scope while the view exists. */
     internal var scope: CoroutineScope? = null
         private set

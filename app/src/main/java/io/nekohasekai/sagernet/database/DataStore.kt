@@ -97,6 +97,8 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var proxyApps by configurationStore.boolean(Key.PROXY_APPS)
     var bypass by configurationStore.boolean(Key.BYPASS_MODE) { true }
     var individual by configurationStore.string(Key.INDIVIDUAL)
+    var hideUnavailableProfiles by configurationStore.boolean(Key.HIDE_UNAVAILABLE_PROFILES)
+    var globalMode by configurationStore.boolean(Key.GLOBAL_MODE)
     /** The VPN hands the mixed inbound to apps as the system HTTP proxy (only without inbound_auth). */
     var appendHttpProxy by configurationStore.boolean(Key.APPEND_HTTP_PROXY)
     var httpProxyBypass by configurationStore.string(Key.HTTP_PROXY_BYPASS) { "" }

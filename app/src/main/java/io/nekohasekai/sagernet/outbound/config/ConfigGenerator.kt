@@ -82,6 +82,10 @@ class ConfigGenerator @JvmOverloads constructor(
         }
         val route = routing.profile?.let(::routeProfileForBuild)
             ?: return GeneratedConfig.failure("Routing profile does not exist, try resetting the route profile in Routing Settings")
+        if (settings.globalMode) {
+            route.rules.clear()
+            route.default_outbound_id = OutboundIds.PROXY
+        }
 
         // One plan serves the Xray decision and the build (the desktop plans twice, :446-452 and :1631).
         val plan = (profile as? AutoSelector)?.let { AutoSelectorPlanner(routing.selectors, clock).plan(profileId, it) }

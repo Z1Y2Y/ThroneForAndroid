@@ -1219,6 +1219,8 @@
     <string name="profiles_update_subscription">Update subscription</string>
     <string name="profiles_other">Other</string>
     <string name="profiles_test_url">URL test</string>
+    <string name="hide_unavailable_profiles">Auto-hide unavailable profiles</string>
+    <string name="global_mode">Global mode</string>
     <string name="profiles_test_ip">IP &amp; country test</string>
     <string name="profiles_test_speed">Speed test</string>
     <string name="profiles_test_speed_current">Speed test current connection</string>

@@ -99,6 +99,8 @@ internal class ProfileListAdapter(private val fragment: ProfileListFragment) :
 
     /** The auto selectors among [memberIds], for the pickers that hide them. */
     private var autoSelectors: Set<Long> = emptySet()
+    /** Profiles whose last connectivity test failed; refreshed with the lightweight group-name query. */
+    private var unavailableIds: Set<Long> = emptySet()
 
     /** The loaded rows, least recently bound first ([touch]); a reload keeps only the ones around the screen. */
     private val cache = object : LinkedHashMap<Long, ProxyEntity>(CACHE_SIZE * 2) {
@@ -305,6 +307,7 @@ internal class ProfileListAdapter(private val fragment: ProfileListFragment) :
         group = newGroup
         memberIds = names.map { it.id }
         autoSelectors = names.filter { it.type == AUTO_SELECTOR }.mapTo(HashSet()) { it.id }
+        unavailableIds = names.filter { ProxyEntity.isUnavailable(it.latency) }.mapTo(HashSet()) { it.id }
         val members = memberIds.toHashSet()
         val previous = HashMap<Long, ProxyEntity>(cache)
         if (onlyRead) cache.clear() else cache.keys.retainAll(members)
@@ -395,9 +398,17 @@ internal class ProfileListAdapter(private val fragment: ProfileListFragment) :
     private fun visibleIds(): List<Long> {
         val matches = matches
         val hideAutoSelectors = host?.hideAutoSelectors == true
-        return memberIds.filter { id ->
+        val eligible = memberIds.filter { id ->
             id !in hidden && (!hideAutoSelectors || id !in autoSelectors) && (matches == null || id in matches)
         }
+        if (!DataStore.hideUnavailableProfiles) return eligible
+        val selectedId = host?.pickedOrSelectedId() ?: DataStore.selectedProxy
+        val available = eligible.filter { it !in unavailableIds || it == selectedId }
+        return available.ifEmpty { eligible }
+    }
+
+    fun refreshVisibility() {
+        if (loaded) publish(emptySet(), false)
     }
 
     /**

@@ -195,17 +195,9 @@ class TunSettingsFragment : SettingsScreenFragment(R.xml.settings_tun) {
         }
 
         proxyApps = pref(Key.PROXY_APPS)
-        // Tapping the row opens the app list; the switch widget itself still controls whether per-app proxy is on.
+        // The switch widget alone changes the setting. The rest of the row opens the picker only while enabled.
         proxyApps.setOnPreferenceClickListener {
-            if (!DataStore.proxyApps) DataStore.dirty = true
-            openAppManager()
-            true
-        }
-        proxyApps.setOnPreferenceChangeListener { _, newValue ->
-            if (newValue as Boolean) {
-                DataStore.dirty = true
-                openAppManager()
-            }
+            if (DataStore.proxyApps) openAppManager()
             true
         }
     }

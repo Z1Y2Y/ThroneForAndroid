@@ -109,6 +109,8 @@ data class GeneratorSettings(
     val rulesetMirror: Int = 1,
     /** adblock_enable (SettingsRepo.h:217): the adblock rule-set and its reject rule. */
     val adblockEnable: Boolean = false,
+    /** Ignore the active routing profile's rules and send traffic through the selected proxy. */
+    val globalMode: Boolean = false,
     /** enable_dns_routing (SettingsRepo.h:189): DNS rules for the route profile's direct and proxy sites. */
     val enableDnsRouting: Boolean = true,
     /** enable_tun_routing (SettingsRepo.h:222): the route profile's direct ip_cidr values bypass the tun. */

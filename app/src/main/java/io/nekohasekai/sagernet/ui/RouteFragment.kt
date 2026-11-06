@@ -568,7 +568,12 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
             val context = itemView.context
             binding.profileName.text = profile.name
             binding.profileName.setTypeface(null, if (current) Typeface.BOLD else Typeface.NORMAL)
-            binding.activeMark.isVisible = current
+            binding.currentProfile.setOnCheckedChangeListener(null)
+            binding.currentProfile.isChecked = current
+            binding.currentProfile.isEnabled = !profile.is_raw
+            binding.currentProfile.setOnCheckedChangeListener { button, checked ->
+                if (checked) select(profile) else if (current) button.isChecked = true
+            }
             binding.profileSummary.text = if (profile.is_raw) getString(R.string.route_raw_summary) else getString(
                 R.string.route_item_default_outbound, RouteTexts.outboundName(context, profile.default_outbound_id, emptyMap())
             ) + " · " + resources.getQuantityString(R.plurals.route_item_rules, profile.rules.size, profile.rules.size)

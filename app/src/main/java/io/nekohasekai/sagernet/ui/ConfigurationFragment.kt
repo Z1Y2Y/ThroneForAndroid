@@ -373,6 +373,8 @@ class ConfigurationFragment : ToolbarFragment(R.layout.layout_group_list),
                 }
             }
         }
+        toolbar.menu.findItem(R.id.action_hide_unavailable_profiles)?.isChecked = DataStore.hideUnavailableProfiles
+        toolbar.menu.findItem(R.id.action_global_mode)?.isChecked = DataStore.globalMode
         toolbar.setOnMenuItemClickListener(this)
         searchView = (toolbar.menu.findItem(R.id.action_search)?.actionView as? SearchView)?.apply {
             setOnQueryTextListener(this@ConfigurationFragment)
@@ -424,6 +426,18 @@ class ConfigurationFragment : ToolbarFragment(R.layout.layout_group_list),
     }
 
     override fun onMenuItemClick(item: MenuItem): Boolean {
+        if (item.itemId == R.id.action_hide_unavailable_profiles) {
+            DataStore.hideUnavailableProfiles = !DataStore.hideUnavailableProfiles
+            item.isChecked = DataStore.hideUnavailableProfiles
+            lists.forEach { it.refreshVisibility() }
+            return true
+        }
+        if (item.itemId == R.id.action_global_mode) {
+            DataStore.globalMode = !DataStore.globalMode
+            item.isChecked = DataStore.globalMode
+            needReload()
+            return true
+        }
         if (item.itemId == R.id.action_misc) {
             toolbar?.menu?.let(groupMenu::prepare)
             return false

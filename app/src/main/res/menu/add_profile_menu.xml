@@ -135,6 +135,21 @@
                         android:id="@+id/action_test_speed"
                         android:title="@string/profiles_test_speed" />
                 </group>
+                <group android:id="@+id/group_menu_subscription">
+                    <item
+                        android:id="@+id/action_update_subscription"
+                        android:title="@string/profiles_update_subscription" />
+                </group>
+                <group android:id="@+id/group_menu_route_modes">
+                    <item
+                        android:id="@+id/action_hide_unavailable_profiles"
+                        android:checkable="true"
+                        android:title="@string/hide_unavailable_profiles" />
+                    <item
+                        android:id="@+id/action_global_mode"
+                        android:checkable="true"
+                        android:title="@string/global_mode" />
+                </group>
                 <group android:id="@+id/group_menu_order">
                     <item
                         android:id="@+id/action_sort"
@@ -219,11 +234,6 @@
                         android:id="@+id/action_other"
                         android:title="@string/profiles_other">
                         <menu>
-                            <group android:id="@+id/group_menu_subscription">
-                                <item
-                                    android:id="@+id/action_update_subscription"
-                                    android:title="@string/profiles_update_subscription" />
-                            </group>
                             <group android:id="@+id/group_menu_misc_actions">
                                 <item
                                     android:id="@+id/action_test_stop"

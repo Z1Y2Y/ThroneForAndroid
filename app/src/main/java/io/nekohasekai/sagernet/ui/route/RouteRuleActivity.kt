@@ -1,11 +1,13 @@
 package io.nekohasekai.sagernet.ui.route
 
+import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
 import androidx.activity.addCallback
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.text.buildSpannedString
 import androidx.core.text.color
 import androidx.core.view.ViewCompat
@@ -20,6 +22,7 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.database.DataStore
+import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.RouteManager
 import io.nekohasekai.sagernet.database.preference.OnPreferenceDataStoreChangeListener
 import io.nekohasekai.sagernet.ktx.FixedLinearLayoutManager
@@ -29,6 +32,7 @@ import io.nekohasekai.sagernet.route.RuleIssue
 import io.nekohasekai.sagernet.route.RuleSetCatalog
 import io.nekohasekai.sagernet.route.RuleType
 import io.nekohasekai.sagernet.ui.AppListActivity
+import io.nekohasekai.sagernet.ui.ProfileSelectActivity
 import io.nekohasekai.sagernet.ui.ThemedActivity
 import io.nekohasekai.sagernet.ui.ValidationForm
 import io.nekohasekai.sagernet.ui.WifiPermissionFlow
@@ -62,6 +66,7 @@ class RouteRuleActivity : ThemedActivity(R.layout.layout_config_settings), OnPre
         private const val STATE_ADVANCED = "advancedExpanded"
         private const val KEY_ADVANCED_TOGGLE = "advancedToggle"
         private const val KEY_ADVANCED_CATEGORY = "advancedCategory"
+        private const val SELECT_PROFILE = "select-profile"
 
         private val TEXT_KEYS = listOf(
             "name", "action", "outbound_id", "reject_method", "strategy", "network", "protocol", "ip_version",
@@ -123,6 +128,21 @@ class RouteRuleActivity : ThemedActivity(R.layout.layout_config_settings), OnPre
 
     private val appPicker = registerForActivityResult(AppListActivity.Contract(unknownEntry = true)) { list ->
         if (list != null) setListValue("package_name", list)
+    }
+
+    private val outboundPicker = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val profileId = result.data?.getLongExtra(ProfileSelectActivity.EXTRA_PROFILE_ID, 0L) ?: 0L
+            if (profileId > 0L && servers.any { it.first == profileId }) {
+                val value = profileId.toString()
+                val store = DataStore.profileCacheStore
+                if (store.getString("outbound_id") != value) {
+                    store.putString("outbound_id", value)
+                    DataStore.dirty = true
+                }
+                fragment?.refreshOutboundOptions()
+            }
+        }
     }
 
     private val wifiFlow = WifiPermissionFlow(this)
@@ -204,6 +224,17 @@ class RouteRuleActivity : ThemedActivity(R.layout.layout_config_settings), OnPre
             DataStore.dirty = true
         }
         fragment?.findPreference<StringLinesPreference>(key)?.refresh()
+    }
+
+    /** Opens the normal profile list, highlighting the currently selected server when it still exists. */
+    private fun pickOutboundProfile() {
+        val currentId = DataStore.profileCacheStore.getString("outbound_id")?.toLongOrNull() ?: 0L
+        lifecycleScope.launch {
+            val selected = withContext(Dispatchers.IO) { ProfileManager.getProfile(currentId) }
+            outboundPicker.launch(Intent(this@RouteRuleActivity, ProfileSelectActivity::class.java).apply {
+                selected?.let { putExtra(ProfileSelectActivity.EXTRA_SELECTED, it) }
+            })
+        }
     }
 
     /** Checks the stored network types; OK keeps the checked ones in sing-box's order, Cancel changes nothing. */
@@ -478,25 +509,41 @@ class RouteRuleActivity : ThemedActivity(R.layout.layout_config_settings), OnPre
             return if (items.size > max) shown + separator + "…" else shown
         }
 
-        /** proxy, direct, block, warp-bypass, then every server as "[group] name"; stored values outside that list stay selectable. */
+        /** Built-in outbounds, the current server, and a shortcut to the full profile picker. */
         private fun setupOutbounds() {
             val pref = findPreference<SimpleMenuPreference>("outbound_id") ?: return
-            val current = pref.value?.toLongOrNull() ?: OutboundIds.DIRECT
+            pref.setOnPreferenceChangeListener { _, value ->
+                if (value?.toString() == SELECT_PROFILE) {
+                    host.pickOutboundProfile()
+                    false
+                } else {
+                    true
+                }
+            }
+            refreshOutboundOptions()
+        }
+
+        fun refreshOutboundOptions() {
+            val pref = findPreference<SimpleMenuPreference>("outbound_id") ?: return
+            val current = DataStore.profileCacheStore.getString("outbound_id")?.toLongOrNull() ?: OutboundIds.DIRECT
             val entries = ArrayList<CharSequence>()
             val values = ArrayList<CharSequence>()
-            fun add(label: String, id: Long) {
+            fun add(label: String, value: String) {
                 entries.add(label)
-                values.add(id.toString())
+                values.add(value)
             }
-            add(OutboundIds.toName(OutboundIds.PROXY), OutboundIds.PROXY)
-            add(OutboundIds.toName(OutboundIds.DIRECT), OutboundIds.DIRECT)
-            add(OutboundIds.toName(OutboundIds.BLOCK), OutboundIds.BLOCK)
-            add(RouteTexts.WARP_BYPASS, OutboundIds.WARP_BYPASS)
-            if (current == OutboundIds.HIJACK_DNS) add("hijack-dns", OutboundIds.HIJACK_DNS)
-            for ((id, label) in host.servers) add(label, id)
-            if (current > 0 && host.servers.none { it.first == current }) {
-                add(getString(R.string.route_rule_missing_server, current), current)
+            fun addId(label: String, id: Long) = add(label, id.toString())
+            addId(OutboundIds.toName(OutboundIds.PROXY), OutboundIds.PROXY)
+            addId(OutboundIds.toName(OutboundIds.DIRECT), OutboundIds.DIRECT)
+            addId(OutboundIds.toName(OutboundIds.BLOCK), OutboundIds.BLOCK)
+            addId(RouteTexts.WARP_BYPASS, OutboundIds.WARP_BYPASS)
+            if (current == OutboundIds.HIJACK_DNS) addId("hijack-dns", OutboundIds.HIJACK_DNS)
+            if (current > 0) {
+                val label = host.servers.firstOrNull { it.first == current }?.second
+                    ?: getString(R.string.route_rule_missing_server, current)
+                addId(label, current)
             }
+            add(getString(R.string.route_profile), SELECT_PROFILE)
             pref.entries = entries.toTypedArray()
             pref.entryValues = values.toTypedArray()
             pref.value = current.toString()
