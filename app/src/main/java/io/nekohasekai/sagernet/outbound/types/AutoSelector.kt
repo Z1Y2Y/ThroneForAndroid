@@ -25,6 +25,9 @@ class AutoSelector : Outbound("autoselector") {
     /** Tracked groups in the user's order; members are taken from each in turn. */
     @JvmField var gids: MutableList<Long> = ArrayList()
 
+    /** Hand-picked member ids from other servers/groups. */
+    @JvmField var pids: MutableList<Long> = ArrayList()
+
     /** Case-insensitive regex over the member display name, empty = all. */
     @JvmField var nameFilter: String = ""
 
@@ -64,6 +67,23 @@ class AutoSelector : Outbound("autoselector") {
     @JvmField var balanceMode: String = "rotate"
     @JvmField var balanceIntervalSec: Int = 30
 
+    /** "latency" or "priority". */
+    @JvmField var strategy: String = STRATEGY_LATENCY
+
+    /** A member takes the first tier it matches; members matching none form an implicit last tier. */
+    @JvmField var tiers: MutableList<Tier> = ArrayList()
+
+    /** Moving back up to a recovered higher tier: checks passed in a row, and seconds since its last failure. */
+    @JvmField var failbackChecks: Int = 3
+    @JvmField var failbackDelaySec: Int = 60
+    @JvmField var failbackInterrupt: Boolean = false
+
+    /** Also judge members by how the real connections they carry end, not only by probes. */
+    @JvmField var passive: Boolean = false
+
+    /** How long a site sticks to the member that last answered it, and avoids one that failed it. */
+    @JvmField var siteMemoryMins: Int = 60
+
     /** Ranked member ids of the last client-side sweep, best first. */
     @JvmField var pool: MutableList<Long> = ArrayList()
 
@@ -78,15 +98,36 @@ class AutoSelector : Outbound("autoselector") {
     /** Newest-first usage log of [HistoryEntry] objects. */
     @JvmField var history: JsonArray = JsonArray()
 
+    /** One priority tier: [gid] -1 = any tracked group, [nameFilter] a case-insensitive regex, "" = any name. */
+    data class Tier(val gid: Long = -1, val nameFilter: String = "") {
+        /** The tier half of autoSelector::TierLabel. */
+        fun label(): String {
+            val parts = ArrayList<String>()
+            if (gid >= 0) parts.add(groupNames?.nameOf(gid) ?: vtr(R.string.autosel_tier_missing_group))
+            val pattern = nameFilter.trim()
+            if (pattern.isNotEmpty()) parts.add(vtr(R.string.autosel_tier_names_matching, pattern))
+            if (parts.isEmpty()) return vtr(R.string.autosel_tier_any_profile)
+            return parts.joinToString(vtr(R.string.autosel_list_separator))
+        }
+    }
+
+    val prioritized: Boolean get() = strategy == STRATEGY_PRIORITY
+
+    /** autoSelector::TierLabel: index tiers.size names the members that match no tier. */
+    fun tierLabel(index: Int): String = tiers.getOrNull(index)?.label() ?: vtr(R.string.autosel_tier_everything_else)
+
     /** autoselector.h:53. */
     override fun displayType(): String = "Auto Selector"
 
     /** autoselector.cpp:9-15: the names of the tracked groups that exist ("" until the app installs [groupNames]). */
     override fun displayAddress(): String {
-        if (gids.none { it >= 0 }) return "no group"
+        if (gids.none { it >= 0 } && pids.none { it >= 0 }) return "no group"
         val lookup = groupNames ?: return ""
         val names = gids.mapNotNull { if (it >= 0) lookup.nameOf(it) else null }
-        return if (names.isEmpty()) "missing group" else names.joinToString(", ")
+        val parts = ArrayList<String>()
+        if (names.isNotEmpty()) parts.add(names.joinToString(", "))
+        if (pids.isNotEmpty()) parts.add("${pids.size} custom nodes")
+        return parts.joinToString(" + ")
     }
 
     /** autoselector.h: no security of its own; it inherits whatever its members use. */
@@ -102,6 +143,13 @@ class AutoSelector : Outbound("autoselector") {
         issues.addIssue(Severity.Error, "country_filter", AutoSelectorChecks.autoSelectorCountries(countryFilter), countryFilter)
         issues.addIssue(Severity.Error, "test_url", AutoSelectorChecks.autoSelectorUrl(testURL), testURL)
         issues.addIssue(Severity.Error, "connectivity_url", AutoSelectorChecks.autoSelectorUrl(connectivityURL), connectivityURL)
+        if (!prioritized) return
+        issues.addIssue(Severity.Error, "tiers", AutoSelectorChecks.autoSelectorTierCount(tiers.size))
+        for ((i, tier) in tiers.withIndex()) {
+            val field = "tiers[$i]"
+            issues.addIssue(Severity.Error, field, AutoSelectorChecks.autoSelectorTierMatch(tier.gid, tier.nameFilter))
+            issues.addIssue(Severity.Error, "$field.name_filter", Validation.regex(tier.nameFilter), tier.nameFilter)
+        }
     }
 
     /**
@@ -117,6 +165,9 @@ class AutoSelector : Outbound("autoselector") {
         } else if (obj.contains("gid")) {
             val gid = longOr(obj["gid"], -1)
             gids = if (gid >= 0) arrayListOf(gid) else ArrayList()
+        }
+        if (obj.contains("pids")) {
+            pids = obj.array("pids").mapNotNullTo(ArrayList()) { longOr(it, -1).takeIf { id -> id >= 0 } }
         }
         if (obj.contains("name_filter")) nameFilter = obj.string("name_filter")
         if (obj.contains("country_filter")) countryFilter = obj.string("country_filter")
@@ -139,6 +190,18 @@ class AutoSelector : Outbound("autoselector") {
         if (obj.contains("balance")) balance = boolOr(obj["balance"], false)
         if (obj.contains("balance_mode")) balanceMode = obj["balance_mode"] as? String ?: "rotate"
         if (obj.contains("balance_interval_sec")) balanceIntervalSec = intOr(obj["balance_interval_sec"], 30)
+        if (obj.contains("strategy")) strategy = obj["strategy"] as? String ?: STRATEGY_LATENCY
+        if (obj.contains("tiers")) {
+            tiers = obj.array("tiers").mapTo(ArrayList()) { value ->
+                val entry = value as? JsonObject ?: JsonObject()
+                Tier(longOr(entry["gid"], -1), entry.string("name_filter"))
+            }
+        }
+        if (obj.contains("failback_checks")) failbackChecks = intOr(obj["failback_checks"], 3)
+        if (obj.contains("failback_delay_sec")) failbackDelaySec = intOr(obj["failback_delay_sec"], 60)
+        if (obj.contains("failback_interrupt")) failbackInterrupt = boolOr(obj["failback_interrupt"], false)
+        if (obj.contains("passive")) passive = boolOr(obj["passive"], false)
+        if (obj.contains("site_memory_mins")) siteMemoryMins = intOr(obj["site_memory_mins"], 60)
         if (obj.contains("pool")) pool = obj.array("pool").mapTo(ArrayList()) { JsonValues.toInteger(it) }
         if (obj.contains("pool_ranked_at")) poolRankedAt = obj.double("pool_ranked_at").toLong()
         if (obj.contains("pinned_id")) pinnedID = longOr(obj["pinned_id"], -1)
@@ -156,6 +219,7 @@ class AutoSelector : Outbound("autoselector") {
         obj["type"] = "autoselector"
         obj["gid"] = gids.firstOrNull() ?: -1L
         obj["gids"] = idArray(gids)
+        obj["pids"] = idArray(pids)
         obj["name_filter"] = nameFilter
         obj["country_filter"] = countryFilter
         obj["exclude_unavailable"] = excludeUnavailable
@@ -177,6 +241,15 @@ class AutoSelector : Outbound("autoselector") {
         obj["balance"] = balance
         obj["balance_mode"] = balanceMode
         obj["balance_interval_sec"] = balanceIntervalSec
+        obj["strategy"] = strategy
+        obj["tiers"] = JsonArray().also { array ->
+            tiers.forEach { array.add(jsonObjectOf("gid" to it.gid, "name_filter" to it.nameFilter)) }
+        }
+        obj["failback_checks"] = failbackChecks
+        obj["failback_delay_sec"] = failbackDelaySec
+        obj["failback_interrupt"] = failbackInterrupt
+        obj["passive"] = passive
+        obj["site_memory_mins"] = siteMemoryMins
         obj["pool"] = idArray(pool)
         obj["pool_ranked_at"] = poolRankedAt
         obj["pinned_id"] = pinnedID
@@ -194,6 +267,8 @@ class AutoSelector : Outbound("autoselector") {
     fun normalize() {
         val seen = HashSet<Long>()
         gids = gids.filterTo(ArrayList()) { it >= 0 && seen.add(it) }
+        val seenPids = HashSet<Long>()
+        pids = pids.filterTo(ArrayList()) { it >= 0 && seenPids.add(it) }
         if (poolCap < 1) poolCap = 1
         if (poolCap > MAX_POOL_CAP) poolCap = MAX_POOL_CAP
         if (buildLimit < 1) buildLimit = 1
@@ -211,6 +286,13 @@ class AutoSelector : Outbound("autoselector") {
         if (activeSize > buildLimit) activeSize = buildLimit
         if (sampling < 2) sampling = 2
         if (sampling > 60) sampling = 60
+        if (failbackChecks < 1) failbackChecks = 1
+        // The core cannot prove more checks in a row than it keeps samples.
+        if (failbackChecks > sampling) failbackChecks = sampling
+        if (failbackDelaySec < 1) failbackDelaySec = 1
+        if (failbackDelaySec > 3600) failbackDelaySec = 3600
+        if (siteMemoryMins < 1) siteMemoryMins = 1
+        if (siteMemoryMins > 1440) siteMemoryMins = 1440
         if (toleranceMs < 0) toleranceMs = 0
         if (maxRTTms < 0) maxRTTms = 0
         if (expected > buildLimit) expected = buildLimit
@@ -218,6 +300,8 @@ class AutoSelector : Outbound("autoselector") {
         if (dialRetries > 5) dialRetries = 5
         if (balanceIntervalSec < 5) balanceIntervalSec = 5
         if (balanceMode != "connection") balanceMode = "rotate"
+        if (strategy != STRATEGY_PRIORITY) strategy = STRATEGY_LATENCY
+        if (tiers.any { it.gid < -1 }) tiers = tiers.mapTo(ArrayList()) { if (it.gid < -1) it.copy(gid = -1) else it }
     }
 
     /** autoselector.h:172-179. */
@@ -293,6 +377,8 @@ class AutoSelector : Outbound("autoselector") {
         const val MAX_POOL_CAP = 3000
         const val MAX_BUILD_LIMIT = 500
         const val MAX_HISTORY_ENTRIES = 2000
+        const val STRATEGY_LATENCY = "latency"
+        const val STRATEGY_PRIORITY = "priority"
 
         /** GroupsRepo lookup for [displayAddress]; the outbound layer has no database, so the app installs it. */
         @JvmStatic
@@ -349,4 +435,17 @@ object AutoSelectorChecks {
     @JvmStatic
     fun autoSelectorCloseCount(activeSize: Int, buildLimit: Int): String =
         if (activeSize <= buildLimit) "" else vtr(R.string.validation_autoselector_close_count, buildLimit.toString())
+
+    /** A tier with neither would take every profile, leaving the tiers below it empty. */
+    @JvmStatic
+    fun autoSelectorTierMatch(gid: Long, nameFilter: String): String =
+        if (gid >= 0 || nameFilter.trim().isNotEmpty()) "" else vtr(R.string.validation_autoselector_tier_match)
+
+    @JvmStatic
+    fun autoSelectorTierCount(tiers: Int): String =
+        if (tiers > 0) "" else vtr(R.string.validation_autoselector_tier_count)
+
+    @JvmStatic
+    fun autoSelectorFailbackChecks(failbackChecks: Int, sampling: Int): String =
+        if (failbackChecks <= sampling) "" else vtr(R.string.validation_autoselector_failback_checks, sampling.toString())
 }

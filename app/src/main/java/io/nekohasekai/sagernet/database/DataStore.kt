@@ -71,7 +71,7 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var startWithoutRuleSets by configurationStore.long(Key.START_WITHOUT_RULE_SETS)
     var groupLayoutMode by configurationStore.stringToInt(Key.GROUP_LAYOUT_MODE) { 0 }
 
-    var networkChangeResetConnections by configurationStore.boolean(Key.NETWORK_CHANGE_RESET_CONNECTIONS) { true }
+    var networkChangeResetConnections by configurationStore.boolean(Key.NETWORK_CHANGE_RESET_CONNECTIONS) { false }
     var wakeResetConnections by configurationStore.boolean(Key.WAKE_RESET_CONNECTIONS) { true }
 
     var appTheme by configurationStore.int(Key.APP_THEME)
@@ -83,6 +83,13 @@ object DataStore : OnPreferenceDataStoreChangeListener {
 
     var showGroupInNotification by configurationStore.boolean(Key.SHOW_GROUP_IN_NOTIFICATION)
     var showDirectSpeed by configurationStore.boolean(Key.SHOW_DIRECT_SPEED) { true }
+    var liveUpdateEnabled by configurationStore.boolean(Key.LIVE_UPDATE_ENABLED)
+    var liveUpdateShowCapsule by configurationStore.boolean(Key.LIVE_UPDATE_SHOW_CAPSULE) { true }
+    var liveUpdatePreset by configurationStore.string(Key.LIVE_UPDATE_PRESET) { "group_first" }
+    var liveUpdateCollapsedFormat by configurationStore.string(Key.LIVE_UPDATE_COLLAPSED_FORMAT) { "{group}" }
+    var liveUpdateTitleFormat by configurationStore.string(Key.LIVE_UPDATE_TITLE_FORMAT) { "{group}" }
+    var liveUpdateContentFormat by configurationStore.string(Key.LIVE_UPDATE_CONTENT_FORMAT) { "↓ {down}   ↑ {up}" }
+    var liveUpdateSubtextFormat by configurationStore.string(Key.LIVE_UPDATE_SUBTEXT_FORMAT) { "{profile} | {ip}" }
     var alwaysShowAddress by configurationStore.boolean(Key.ALWAYS_SHOW_ADDRESS)
     var compactProfileRows by configurationStore.boolean(Key.COMPACT_PROFILE_ROWS)
     var compactGroupCards by configurationStore.boolean(Key.COMPACT_GROUP_CARDS)
@@ -285,6 +292,7 @@ object DataStore : OnPreferenceDataStoreChangeListener {
 
     // warp
     var enableWarp by SettingsRegistry.ENABLE_WARP
+    var enableTor by SettingsRegistry.ENABLE_TOR
     var warpMode by SettingsRegistry.WARP_MODE
     var warpEp by SettingsRegistry.WARP_EP
     var warpPrivateKey by SettingsRegistry.WARP_PRIVATE_KEY
@@ -300,6 +308,9 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var warpMasqueSni by SettingsRegistry.WARP_MASQUE_SNI
     var warpMasqueHttpMode by SettingsRegistry.WARP_MASQUE_HTTP_MODE
     var warpApiHosts by SettingsRegistry.WARP_API_HOSTS
+    var warpApiTlsFragment by SettingsRegistry.WARP_API_TLS_FRAGMENT
+    var warpApiTlsRecordFragment by SettingsRegistry.WARP_API_TLS_RECORD_FRAGMENT
+    var warpApiTlsFragmentFallbackDelay by SettingsRegistry.WARP_API_TLS_FRAGMENT_FALLBACK_DELAY
 
     // core
     var logLevel by SettingsRegistry.LOG_LEVEL

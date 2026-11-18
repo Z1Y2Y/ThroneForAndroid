@@ -5,18 +5,30 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import android.view.LayoutInflater
+import android.view.ViewGroup.LayoutParams.MATCH_PARENT
+import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+import android.widget.LinearLayout
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.preference.EditTextPreference
 import androidx.preference.MultiSelectListPreference
 import androidx.preference.Preference
+import androidx.preference.PreferenceDataStore
 import androidx.preference.SwitchPreference
+import com.google.android.material.checkbox.MaterialCheckBox
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import io.nekohasekai.sagernet.Action
 import io.nekohasekai.sagernet.BootReceiver
 import io.nekohasekai.sagernet.BuildConfig
 import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.SagerNet
+import io.nekohasekai.sagernet.bg.LiveUpdateFormatter
+import io.nekohasekai.sagernet.bg.ServiceNotification
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.SettingsRegistry
+import io.nekohasekai.sagernet.database.preference.OnPreferenceDataStoreChangeListener
 import io.nekohasekai.sagernet.ktx.needReload
 import io.nekohasekai.sagernet.ktx.remove
 import io.nekohasekai.sagernet.ui.MainActivity
@@ -151,25 +163,151 @@ class AppearanceSettingsFragment : SettingsScreenFragment(R.xml.settings_appeara
             AppLocale.apply(newValue as String)
             true
         }
-        reloadOn(Key.SHOW_DIRECT_SPEED)
+        DataStore.configurationStore.registerChangeListener(notificationListener)
 
-        pref<MultiSelectListPreference>(Key.NOTIFICATION_ACTIONS).apply {
-            summaryProvider = Preference.SummaryProvider<MultiSelectListPreference> { p ->
+        val liveUpdateEnabled = pref<SwitchPreference>(Key.LIVE_UPDATE_ENABLED)
+        val liveUpdateShowCapsule = pref<SwitchPreference>(Key.LIVE_UPDATE_SHOW_CAPSULE)
+        val liveUpdatePreset = pref<SimpleMenuPreference>(Key.LIVE_UPDATE_PRESET)
+        val liveUpdateCollapsed = pref<EditTextPreference>(Key.LIVE_UPDATE_COLLAPSED_FORMAT)
+        val liveUpdateTitle = pref<EditTextPreference>(Key.LIVE_UPDATE_TITLE_FORMAT)
+        val liveUpdateContent = pref<EditTextPreference>(Key.LIVE_UPDATE_CONTENT_FORMAT)
+        val liveUpdateSubtext = pref<EditTextPreference>(Key.LIVE_UPDATE_SUBTEXT_FORMAT)
+        val liveUpdatePreview = pref<Preference>("liveUpdatePreview")
+
+        fun notifyNotificationUpdate() {
+            if (DataStore.serviceState.started) {
+                val intent = Intent(Action.REFRESH_NOTIFICATION)
+                intent.setPackage(requireContext().packageName)
+                requireContext().sendBroadcast(intent)
+            }
+        }
+
+        fun updateLiveUpdatePreview() {
+            val mockInfo = LiveUpdateFormatter.getMockInfo(requireContext())
+            val tpls = LiveUpdateFormatter.getTemplates()
+            val renderedCollapsed = LiveUpdateFormatter.format(tpls.collapsed, mockInfo)
+            val renderedTitle = LiveUpdateFormatter.format(tpls.title, mockInfo)
+            val renderedContent = LiveUpdateFormatter.format(tpls.content, mockInfo)
+            val renderedSub = LiveUpdateFormatter.format(tpls.subText, mockInfo)
+            liveUpdatePreview.summary = if (renderedSub.isNotEmpty()) {
+                getString(
+                    R.string.live_update_preview_summary_format,
+                    renderedCollapsed,
+                    renderedTitle,
+                    renderedContent,
+                    renderedSub
+                )
+            } else {
+                getString(
+                    R.string.live_update_preview_summary_format_no_sub,
+                    renderedCollapsed,
+                    renderedTitle,
+                    renderedContent
+                )
+            }
+        }
+
+        liveUpdateEnabled.setOnPreferenceChangeListener { _, newValue ->
+            DataStore.liveUpdateEnabled = newValue as Boolean
+            view?.post {
+                updateLiveUpdatePreview()
+                notifyNotificationUpdate()
+            }
+            needReload()
+            true
+        }
+
+        liveUpdateShowCapsule.setOnPreferenceChangeListener { _, newValue ->
+            DataStore.liveUpdateShowCapsule = newValue as Boolean
+            view?.post {
+                notifyNotificationUpdate()
+            }
+            true
+        }
+
+        liveUpdateCollapsed.isEnabled = true
+        liveUpdateTitle.isEnabled = true
+        liveUpdateContent.isEnabled = true
+        liveUpdateSubtext.isEnabled = true
+
+        updateLiveUpdatePreview()
+
+        liveUpdatePreset.setOnPreferenceChangeListener { _, newValue ->
+            val newPreset = newValue as String
+            if (newPreset != LiveUpdateFormatter.PRESET_CUSTOM) {
+                val tpls = LiveUpdateFormatter.getPresetTemplates(newPreset)
+                DataStore.liveUpdateCollapsedFormat = tpls.collapsed
+                DataStore.liveUpdateTitleFormat = tpls.title
+                DataStore.liveUpdateContentFormat = tpls.content
+                DataStore.liveUpdateSubtextFormat = tpls.subText
+
+                liveUpdateCollapsed.text = tpls.collapsed
+                liveUpdateTitle.text = tpls.title
+                liveUpdateContent.text = tpls.content
+                liveUpdateSubtext.text = tpls.subText
+            }
+            DataStore.liveUpdatePreset = newPreset
+            view?.post {
+                updateLiveUpdatePreview()
+                notifyNotificationUpdate()
+            }
+            needReload()
+            true
+        }
+
+        fun bindFormatField(pref: EditTextPreference, onSave: (String) -> Unit) {
+            pref.setOnPreferenceChangeListener { _, newValue ->
+                val str = (newValue as? String).orEmpty().trim()
+                onSave(str)
+                DataStore.liveUpdatePreset = LiveUpdateFormatter.PRESET_CUSTOM
+                liveUpdatePreset.value = LiveUpdateFormatter.PRESET_CUSTOM
+                view?.post {
+                    updateLiveUpdatePreview()
+                    notifyNotificationUpdate()
+                }
+                needReload()
+                true
+            }
+        }
+
+        bindFormatField(liveUpdateCollapsed) { DataStore.liveUpdateCollapsedFormat = it }
+        bindFormatField(liveUpdateTitle) { DataStore.liveUpdateTitleFormat = it }
+        bindFormatField(liveUpdateContent) { DataStore.liveUpdateContentFormat = it }
+        bindFormatField(liveUpdateSubtext) { DataStore.liveUpdateSubtextFormat = it }
+
+        liveUpdatePreview.setOnPreferenceClickListener {
+            val mockInfo = LiveUpdateFormatter.getMockInfo(requireContext())
+            val tpls = LiveUpdateFormatter.getTemplates()
+            val renderedCollapsed = LiveUpdateFormatter.format(tpls.collapsed, mockInfo)
+            val renderedTitle = LiveUpdateFormatter.format(tpls.title, mockInfo)
+            val renderedContent = LiveUpdateFormatter.format(tpls.content, mockInfo)
+            val renderedSub = LiveUpdateFormatter.format(tpls.subText, mockInfo).ifEmpty {
+                getString(androidx.preference.R.string.not_set)
+            }
+
+            MaterialAlertDialogBuilder(requireContext())
+                .setTitle(R.string.live_update_preview_dialog_title)
+                .setMessage(
+                    getString(
+                        R.string.live_update_preview_dialog_message,
+                        renderedCollapsed,
+                        renderedTitle,
+                        renderedContent,
+                        renderedSub
+                    )
+                )
+                .setPositiveButton(android.R.string.ok, null)
+                .show()
+            true
+        }
+
+        pref<MultiSelectListPreference>(Key.NOTIFICATION_ACTIONS).summaryProvider =
+            Preference.SummaryProvider<MultiSelectListPreference> { p ->
                 val chosen = p.values
                 p.entryValues.indices.filter { p.entryValues[it].toString() in chosen }
                     .joinToString(", ") { p.entries[it] }
                     .ifEmpty { getString(androidx.preference.R.string.not_set) }
             }
-            setOnPreferenceChangeListener { _, newValue ->
-                if ((newValue as Set<*>).size > 3) {
-                    toast(R.string.notification_actions_too_many)
-                    false
-                } else {
-                    needReload()
-                    true
-                }
-            }
-        }
         notificationPermission = pref(KEY_NOTIFICATION_PERMISSION)
         notificationPermission.setOnPreferenceClickListener {
             openNotificationSettings()
@@ -178,6 +316,55 @@ class AppearanceSettingsFragment : SettingsScreenFragment(R.xml.settings_appeara
     }
 
     private lateinit var notificationPermission: Preference
+
+    // After the write, so the service reads the new value.
+    private val notificationListener = object : OnPreferenceDataStoreChangeListener {
+        override fun onPreferenceDataStoreChanged(store: PreferenceDataStore, key: String) {
+            if (key in NOTIFICATION_KEYS && DataStore.serviceState.started) SagerNet.refreshNotification()
+        }
+    }
+
+    override fun onDestroy() {
+        DataStore.configurationStore.unregisterChangeListener(notificationListener)
+        super.onDestroy()
+    }
+
+    override fun onDisplayPreferenceDialog(preference: Preference) {
+        if (preference.key == Key.NOTIFICATION_ACTIONS) {
+            pickNotificationActions(preference as MultiSelectListPreference)
+        } else {
+            super.onDisplayPreferenceDialog(preference)
+        }
+    }
+
+    /** The template shows three buttons: once three are ticked the others are greyed out. */
+    private fun pickNotificationActions(preference: MultiSelectListPreference) {
+        val builder = MaterialAlertDialogBuilder(requireContext())
+        val view = LayoutInflater.from(builder.context).inflate(R.layout.layout_notification_actions, null)
+        val list = view.findViewById<LinearLayout>(R.id.actions)
+        val values = preference.entryValues.map { it.toString() }
+        val boxes = preference.entries.mapIndexed { i, entry ->
+            MaterialCheckBox(list.context).apply {
+                text = entry
+                isChecked = values[i] in preference.values
+                list.addView(this, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+            }
+        }
+        fun sync() {
+            val full = boxes.count { it.isChecked } >= ServiceNotification.MAX_ACTIONS
+            for (box in boxes) box.isEnabled = box.isChecked || !full
+        }
+        for (box in boxes) box.setOnCheckedChangeListener { _, _ -> sync() }
+        sync()
+        builder.setTitle(preference.title)
+            .setView(view)
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                val chosen = values.filterIndexedTo(HashSet()) { i, _ -> boxes[i].isChecked }
+                if (preference.callChangeListener(chosen)) preference.values = chosen
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
 
     override fun onResume() {
         super.onResume()
@@ -223,5 +410,6 @@ class AppearanceSettingsFragment : SettingsScreenFragment(R.xml.settings_appeara
 
     private companion object {
         const val KEY_NOTIFICATION_PERMISSION = "notificationPermission"
+        val NOTIFICATION_KEYS = setOf(Key.NOTIFICATION_ACTIONS, Key.SHOW_DIRECT_SPEED, Key.SHOW_GROUP_IN_NOTIFICATION)
     }
 }

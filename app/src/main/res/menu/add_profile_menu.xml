@@ -138,6 +138,9 @@
                         android:id="@+id/action_test_ip"
                         android:title="@string/profiles_test_ip" />
                     <item
+                        android:id="@+id/action_test_service"
+                        android:title="@string/service_check" />
+                    <item
                         android:id="@+id/action_test_stop"
                         android:title="@string/profiles_test_stop"
                         android:visible="false" />

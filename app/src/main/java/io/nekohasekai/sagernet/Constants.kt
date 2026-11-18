@@ -24,6 +24,13 @@ object Key {
     const val SHOW_DIRECT_SPEED = "showDirectSpeed"
     const val SHOW_GROUP_IN_NOTIFICATION = "showGroupInNotification"
     const val NOTIFICATION_ACTIONS = "notificationActions"
+    const val LIVE_UPDATE_ENABLED = "liveUpdateEnabled"
+    const val LIVE_UPDATE_SHOW_CAPSULE = "liveUpdateShowCapsule"
+    const val LIVE_UPDATE_PRESET = "liveUpdatePreset"
+    const val LIVE_UPDATE_COLLAPSED_FORMAT = "liveUpdateCollapsedFormat"
+    const val LIVE_UPDATE_TITLE_FORMAT = "liveUpdateTitleFormat"
+    const val LIVE_UPDATE_CONTENT_FORMAT = "liveUpdateContentFormat"
+    const val LIVE_UPDATE_SUBTEXT_FORMAT = "liveUpdateSubtextFormat"
 
     const val APPEND_HTTP_PROXY = "appendHttpProxy"
     const val HTTP_PROXY_BYPASS = "httpProxyBypass"
@@ -95,6 +102,9 @@ object Action {
     const val SWITCH_PREVIOUS = "io.nekohasekai.sagernet.SWITCH_PREVIOUS"
     const val SWITCH_PROFILE = "io.nekohasekai.sagernet.SWITCH_PROFILE"
     const val REFRESH_WIFI_STATE = "io.nekohasekai.sagernet.REFRESH_WIFI_STATE"
+
+    /** The notification settings changed: the running notification is redrawn without a restart. */
+    const val REFRESH_NOTIFICATION = "io.nekohasekai.sagernet.REFRESH_NOTIFICATION"
 
     /** The auto-selector [EXTRA_PROFILE_ID] goes back to automatic in the running core. */
     const val AUTO_SELECTOR_AUTOMATIC = "io.nekohasekai.sagernet.AUTO_SELECTOR_AUTOMATIC"

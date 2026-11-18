@@ -1,6 +1,5 @@
 package io.nekohasekai.sagernet.ui.route
 
-import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
 import android.view.Menu
@@ -8,6 +7,7 @@ import android.view.MenuItem
 import android.view.View
 import androidx.activity.addCallback
 import androidx.activity.result.contract.ActivityResultContracts
+import io.nekohasekai.sagernet.ui.ProfileSelectActivity
 import androidx.core.text.buildSpannedString
 import androidx.core.text.color
 import androidx.core.view.ViewCompat
@@ -32,7 +32,6 @@ import io.nekohasekai.sagernet.route.RuleIssue
 import io.nekohasekai.sagernet.route.RuleSetCatalog
 import io.nekohasekai.sagernet.route.RuleType
 import io.nekohasekai.sagernet.ui.AppListActivity
-import io.nekohasekai.sagernet.ui.ProfileSelectActivity
 import io.nekohasekai.sagernet.ui.ThemedActivity
 import io.nekohasekai.sagernet.ui.ValidationForm
 import io.nekohasekai.sagernet.ui.WifiPermissionFlow
@@ -66,7 +65,7 @@ class RouteRuleActivity : ThemedActivity(R.layout.layout_config_settings), OnPre
         private const val STATE_ADVANCED = "advancedExpanded"
         private const val KEY_ADVANCED_TOGGLE = "advancedToggle"
         private const val KEY_ADVANCED_CATEGORY = "advancedCategory"
-        private const val SELECT_PROFILE = "select-profile"
+        private const val SELECT_PROFILE = "SELECT_PROFILE"
 
         private val TEXT_KEYS = listOf(
             "name", "action", "outbound_id", "reject_method", "strategy", "network", "protocol", "ip_version",
@@ -131,16 +130,15 @@ class RouteRuleActivity : ThemedActivity(R.layout.layout_config_settings), OnPre
     }
 
     private val outboundPicker = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
+        if (result.resultCode == RESULT_OK) {
             val profileId = result.data?.getLongExtra(ProfileSelectActivity.EXTRA_PROFILE_ID, 0L) ?: 0L
             if (profileId > 0L && servers.any { it.first == profileId }) {
-                val value = profileId.toString()
                 val store = DataStore.profileCacheStore
-                if (store.getString("outbound_id") != value) {
-                    store.putString("outbound_id", value)
-                    DataStore.dirty = true
-                }
-                fragment?.refreshOutboundOptions()
+                store.putString("outbound_id", profileId.toString())
+                store.putString("action", "route")
+                DataStore.dirty = true
+                fragment?.setupOutbounds()
+                fragment?.refreshState()
             }
         }
     }
@@ -193,8 +191,16 @@ class RouteRuleActivity : ThemedActivity(R.layout.layout_config_settings), OnPre
         if (key == Key.PROFILE_DIRTY) return
         issueCache = null
         DataStore.dirty = true
+        if (key == "outbound_id") {
+            val act = store.getString("action", "route")
+            if (act != "route" && act != "bypass") {
+                store.putString("action", "route")
+                fragment?.findPreference<SimpleMenuPreference>("action")?.value = "route"
+            }
+        }
         runOnUiThread {
             lineChecks.remove(key)
+            fragment?.setupOutbounds()
             fragment?.refreshState()
             // RouteItem::scheduleRuleCheck: any field can change the whole-rule verdicts on the action row.
             fragment?.form?.revalidate("action")
@@ -509,44 +515,45 @@ class RouteRuleActivity : ThemedActivity(R.layout.layout_config_settings), OnPre
             return if (items.size > max) shown + separator + "…" else shown
         }
 
-        /** Built-in outbounds, the current server, and a shortcut to the full profile picker. */
-        private fun setupOutbounds() {
+        /** proxy, direct, block, warp-bypass, select profile, and every server as "[group] name". */
+        fun setupOutbounds() {
             val pref = findPreference<SimpleMenuPreference>("outbound_id") ?: return
-            pref.setOnPreferenceChangeListener { _, value ->
-                if (value?.toString() == SELECT_PROFILE) {
-                    host.pickOutboundProfile()
-                    false
-                } else {
-                    true
-                }
-            }
-            refreshOutboundOptions()
-        }
-
-        fun refreshOutboundOptions() {
-            val pref = findPreference<SimpleMenuPreference>("outbound_id") ?: return
-            val current = DataStore.profileCacheStore.getString("outbound_id")?.toLongOrNull() ?: OutboundIds.DIRECT
+            val current = pref.value?.toLongOrNull() ?: OutboundIds.DIRECT
             val entries = ArrayList<CharSequence>()
             val values = ArrayList<CharSequence>()
-            fun add(label: String, value: String) {
+            fun add(label: String, id: Long) {
                 entries.add(label)
-                values.add(value)
+                values.add(id.toString())
             }
-            fun addId(label: String, id: Long) = add(label, id.toString())
-            addId(OutboundIds.toName(OutboundIds.PROXY), OutboundIds.PROXY)
-            addId(OutboundIds.toName(OutboundIds.DIRECT), OutboundIds.DIRECT)
-            addId(OutboundIds.toName(OutboundIds.BLOCK), OutboundIds.BLOCK)
-            addId(RouteTexts.WARP_BYPASS, OutboundIds.WARP_BYPASS)
-            if (current == OutboundIds.HIJACK_DNS) addId("hijack-dns", OutboundIds.HIJACK_DNS)
-            if (current > 0) {
-                val label = host.servers.firstOrNull { it.first == current }?.second
-                    ?: getString(R.string.route_rule_missing_server, current)
-                addId(label, current)
+            add(getString(R.string.route_outbound_proxy), OutboundIds.PROXY)
+            add(getString(R.string.route_outbound_direct), OutboundIds.DIRECT)
+            add(getString(R.string.route_outbound_block), OutboundIds.BLOCK)
+            add(RouteTexts.WARP_BYPASS, OutboundIds.WARP_BYPASS)
+            if (current == OutboundIds.HIJACK_DNS) add("hijack-dns", OutboundIds.HIJACK_DNS)
+
+            entries.add(getString(R.string.route_outbound_select_profile))
+            values.add("SELECT_PROFILE")
+
+            if (current > 0 && host.servers.none { it.first == current }) {
+                add(getString(R.string.route_rule_missing_server, current), current)
             }
-            add(getString(R.string.route_profile), SELECT_PROFILE)
+            for ((id, label) in host.servers) add(label, id)
+
             pref.entries = entries.toTypedArray()
             pref.entryValues = values.toTypedArray()
             pref.value = current.toString()
+
+            pref.setOnPreferenceChangeListener { _, newValue ->
+                val v = newValue.toString()
+                if (v == SELECT_PROFILE) {
+                    host.pickOutboundProfile()
+                    false
+                } else {
+                    DataStore.profileCacheStore.putString("action", "route")
+                    DataStore.dirty = true
+                    true
+                }
+            }
         }
 
         /** A stored value the menu does not offer (e.g. from a desktop profile) is added so it is not replaced. */
@@ -576,7 +583,7 @@ class RouteRuleActivity : ThemedActivity(R.layout.layout_config_settings), OnPre
                 else -> action
             }
             val routes = effective == "route" || effective == "bypass"
-            setVisible(action == "route" || action == "bypass", "outbound_id")
+            findPreference<Preference>("outbound_id")?.isVisible = true
             setVisible(effective == "reject", "reject_method", "no_drop")
             setVisible(effective == "resolve", "strategy")
             setVisible(effective == "sniff", "sniff_override_dest")

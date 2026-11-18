@@ -183,6 +183,10 @@ class SagerNet : Application(),
                 notification.createNotificationChannels(
                     listOf(
                         NotificationChannel(
+                            "service-live-update",
+                            application.getText(R.string.live_update_channel),
+                            NotificationManager.IMPORTANCE_LOW
+                        ), NotificationChannel(
                             "service-vpn",
                             application.getText(R.string.service_vpn),
                             if (Build.VERSION.SDK_INT >= 28) NotificationManager.IMPORTANCE_MIN
@@ -216,6 +220,9 @@ class SagerNet : Application(),
 
         fun reloadService() =
             application.sendBroadcast(Intent(Action.RELOAD).setPackage(application.packageName))
+
+        fun refreshNotification() =
+            application.sendBroadcast(Intent(Action.REFRESH_NOTIFICATION).setPackage(application.packageName))
 
         fun stopService() =
             application.sendBroadcast(Intent(Action.CLOSE).setPackage(application.packageName))

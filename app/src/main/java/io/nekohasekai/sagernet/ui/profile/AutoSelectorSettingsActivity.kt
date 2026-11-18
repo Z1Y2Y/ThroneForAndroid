@@ -1,11 +1,35 @@
 package io.nekohasekai.sagernet.ui.profile
 
 import android.content.Intent
+import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.view.Gravity
+import android.view.ViewGroup
+import android.widget.ArrayAdapter
+import android.widget.EditText
+import android.widget.HorizontalScrollView
+import android.widget.LinearLayout
+import android.widget.TextView
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.PluralsRes
 import androidx.annotation.StringRes
+import androidx.core.content.ContextCompat
+import androidx.core.view.isVisible
+import androidx.core.widget.addTextChangedListener
+import androidx.core.widget.doAfterTextChanged
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
+import com.google.android.material.checkbox.MaterialCheckBox
+import com.google.android.material.snackbar.Snackbar
+import io.nekohasekai.sagernet.database.ProxyEntity
+import io.nekohasekai.sagernet.database.ProxyGroup
+import io.nekohasekai.sagernet.database.SagerDatabase
+import io.nekohasekai.sagernet.ktx.dp2px
+import io.nekohasekai.sagernet.ui.ProfileSelectActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.preference.EditTextPreference
+import androidx.preference.ListPreference
 import androidx.preference.MultiSelectListPreference
 import androidx.preference.Preference
 import androidx.preference.PreferenceCategory
@@ -20,17 +44,23 @@ import io.nekohasekai.sagernet.database.GroupRepo
 import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.SettingsMapper
 import io.nekohasekai.sagernet.database.preference.EditTextPreferenceModifiers
+import io.nekohasekai.sagernet.databinding.LayoutAutoSelectorTierBinding
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
 import io.nekohasekai.sagernet.ktx.runOnMainDispatcher
 import io.nekohasekai.sagernet.outbound.config.AutoSelectorPlan
 import io.nekohasekai.sagernet.outbound.config.AutoSelectorPlanner
 import io.nekohasekai.sagernet.outbound.config.AutoSelectorSkip
+import io.nekohasekai.sagernet.outbound.json.JsonArray
+import io.nekohasekai.sagernet.outbound.json.JsonInput
+import io.nekohasekai.sagernet.outbound.json.jsonObjectOf
 import io.nekohasekai.sagernet.outbound.types.AutoSelector
 import io.nekohasekai.sagernet.outbound.types.AutoSelectorChecks
 import io.nekohasekai.sagernet.ui.FormIssue
 import io.nekohasekai.sagernet.ui.ValidationForm
 import io.nekohasekai.sagernet.validation.Severity
+import io.nekohasekai.sagernet.validation.Validation
+import java.util.Collections
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -38,26 +68,41 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * EditAutoSelector (edit_autoselector.cpp + .ui): the tracked groups, the name filter, balancing, the preferred profile
- * with "Use automatic", the live plan summary and the collapsed Advanced groups with the desktop's limits. Saving
- * goes through the validation form ([bindValidation]) and prunes `pool` to the members that still qualify.
+ * EditAutoSelector (edit_autoselector.cpp + .ui): the tracked groups, the name filter, the strategy with its ordered
+ * priority tiers, balancing, the preferred profile with "Use automatic", the live plan summary and the collapsed
+ * Advanced groups with the desktop's limits. Saving goes through the validation form ([bindValidation]) and prunes
+ * `pool` to the members that still qualify.
  */
 class AutoSelectorSettingsActivity : BindingSettingsActivity<AutoSelector>() {
 
-    private companion object {
+    companion object {
         /** "Servers from": the checked group ids as a string set; [AutoSelector.gids] is not a binding. */
         const val KEY_GIDS = "gids"
+        const val KEY_PIDS = "pids"
         const val KEY_PINNED = "autoselPinned"
         const val KEY_PLAN = "autoselPlan"
         const val KEY_ADVANCED = "autoselAdvanced"
         const val KEY_BALANCE_HINT = "autoselBalanceHint"
+        const val KEY_STRATEGY = "strategy"
+
+        /** The "Add tier" row; the cache holds the edited tiers under it as `{"tiers":[…]}` ([AutoSelector.tiers] is not a binding). */
+        const val KEY_TIERS = "tiers"
         const val STATE_ADVANCED = "autoselAdvancedExpanded"
         val ADVANCED_CATEGORIES =
             listOf("autoselMembership", "autoselHealth", "autoselSwitching", "autoselBalancing", "autoselEndpoints")
+        val FAILBACK_KEYS = listOf("failbackChecks", "failbackDelaySec", "failbackInterrupt")
 
         /** The fields refreshPlanSummary reads. */
-        val PLAN_KEYS =
-            setOf(KEY_GIDS, "nameFilter", "countryFilter", "excludeUnavailable", "poolCap", "buildLimit", "resultValidityMins")
+        val PLAN_KEYS = setOf(
+            KEY_GIDS, KEY_PIDS, "nameFilter", "countryFilter", "excludeUnavailable", "poolCap", "buildLimit", "resultValidityMins",
+            KEY_STRATEGY, KEY_TIERS,
+        )
+
+        /** Top-level rows are this far apart in order, so the tier rows fit between the strategy and "Add tier". */
+        const val ROW_ORDER_GAP = 1000
+
+        /** A tier's row; Validate's `tiers[i]` issues land on it. */
+        fun tierKey(index: Int) = "tiers[$index]"
     }
 
     /** A spin box of edit_autoselector.ui: its range, unit and the text of 0 when it has one. */
@@ -82,6 +127,9 @@ class AutoSelectorSettingsActivity : BindingSettingsActivity<AutoSelector>() {
         IntField("toleranceMs", 0, 10000, R.plurals.autosel_milliseconds),
         IntField("maxRTTms", 0, 60000, R.plurals.autosel_milliseconds, R.string.autosel_no_limit),
         IntField("dialRetries", 0, 5),
+        IntField("failbackChecks", 1, 60, R.plurals.autosel_checks),
+        IntField("failbackDelaySec", 1, 3600, R.plurals.autosel_seconds),
+        IntField("siteMemoryMins", 1, 1440, R.plurals.autosel_minutes),
         IntField("balanceIntervalSec", 5, 3600, R.plurals.autosel_seconds),
     )
 
@@ -98,6 +146,9 @@ class AutoSelectorSettingsActivity : BindingSettingsActivity<AutoSelector>() {
         pbm.text("countryFilter")
         pbm.bool("excludeUnavailable")
         pbm.bool("interruptOnSwitch")
+        pbm.text(KEY_STRATEGY)
+        pbm.bool("failbackInterrupt")
+        pbm.bool("passive")
         pbm.text("balanceMode")
         pbm.text("testURL")
         pbm.text("connectivityURL")
@@ -109,11 +160,17 @@ class AutoSelectorSettingsActivity : BindingSettingsActivity<AutoSelector>() {
     private var advancedExpanded = false
     private var balanceOn = false
     private var balanceMode = "rotate"
+    private var strategy = AutoSelector.STRATEGY_LATENCY
+    private val prioritySelected get() = strategy == AutoSelector.STRATEGY_PRIORITY
     private var planJob: Job? = null
     private var fragment: PreferenceFragmentCompat? = null
+    private val tierRows = ArrayList<Preference>()
 
     /** Every group id, archived ones included; at least one checked group must be among them. */
     private var knownGroups: Set<Long> = emptySet()
+
+    /** The groups "Servers from" lists, by id with their entry text: a tier's group choices. */
+    private var listedGroups: List<Pair<Long, CharSequence>> = emptyList()
 
     /** Every group id in tab order: the order checked groups are saved in. */
     @Volatile
@@ -133,11 +190,15 @@ class AutoSelectorSettingsActivity : BindingSettingsActivity<AutoSelector>() {
     override fun AutoSelector.init() {
         pbm.writeToCacheAll(this)
         DataStore.profileCacheStore.putStringSet(KEY_GIDS, gids.mapTo(LinkedHashSet()) { it.toString() })
+        DataStore.profileCacheStore.putStringSet(KEY_PIDS, pids.mapTo(LinkedHashSet()) { it.toString() })
+        putTiers(tiers)
     }
 
     override fun AutoSelector.serialize() {
         pbm.fromCacheAll(this)
         gids = checkedGroups(gids)
+        pids = checkedPids()
+        tiers = cachedTiers()
         nameFilter = nameFilter.trim()
         countryFilter = countryFilter.trim()
         testURL = testURL.trim()
@@ -164,6 +225,8 @@ class AutoSelectorSettingsActivity : BindingSettingsActivity<AutoSelector>() {
         copy.parseFromJson(ensureEditingOutbound().exportToJson())
         pbm.fromCacheAll(copy)
         copy.gids = checkedGroups(copy.gids)
+        copy.pids = checkedPids()
+        copy.tiers = cachedTiers()
         copy.nameFilter = copy.nameFilter.trim()
         copy.countryFilter = copy.countryFilter.trim()
         copy.testURL = copy.testURL.trim()
@@ -171,11 +234,20 @@ class AutoSelectorSettingsActivity : BindingSettingsActivity<AutoSelector>() {
         return copy
     }
 
-    /** edit_autoselector.cpp bindValidation plus onEnd's name check; AutoSelector.validate covers the filters and URLs. */
+    /**
+     * Validate's `tiers[i]` issues sit on that tier's row ("Tier N: …" in the save dialog, like the desktop's tier rule),
+     * its `tiers` issue on "Add tier".
+     */
+    override fun issueKey(field: String): String? = if (field.startsWith("tiers[")) field.substringBefore('.') else null
+
+    /** edit_autoselector.cpp bindValidation plus onEnd's name check; AutoSelector.validate covers the filters, URLs and tiers. */
     override fun ValidationForm.bindValidation() {
         bind("name") { if (it.isEmpty()) getString(R.string.autosel_name_empty) else "" }
         // The form reads a row's text, which a multi-select does not have, so the rule reads the checked set itself.
-        bind(KEY_GIDS) { _ -> if (checkedIds().any { it in knownGroups }) "" else getString(R.string.autosel_select_group) }
+        bind(KEY_GIDS) { _ ->
+            if (checkedIds().any { it in knownGroups } || checkedPids().isNotEmpty()) ""
+            else getString(R.string.autosel_select_group_or_node)
+        }
         // Rows of the collapsed Advanced section are skipped by rules, so these always run and reveal the section.
         addIssueSource {
             fun value(key: String) = DataStore.profileCacheStore.getString(key)?.trim()?.toIntOrNull() ?: 0
@@ -188,6 +260,11 @@ class AutoSelectorSettingsActivity : BindingSettingsActivity<AutoSelector>() {
                 crossIssue("watchIntervalSec", "intervalSec", AutoSelectorChecks.autoSelectorWatchInterval(value("watchIntervalSec"), interval)),
                 crossIssue("activeSize", "expected", AutoSelectorChecks.autoSelectorReadyCount(activeSize, value("expected"))),
                 crossIssue("activeSize", "buildLimit", AutoSelectorChecks.autoSelectorCloseCount(activeSize, buildLimit)),
+                // Sampling stays checkable in latency mode, where failback is not used.
+                if (!prioritySelected) null else crossIssue(
+                    "failbackChecks", "sampling",
+                    AutoSelectorChecks.autoSelectorFailbackChecks(value("failbackChecks"), value("sampling")),
+                ),
             )
         }
         revealer = { key ->
@@ -214,9 +291,22 @@ class AutoSelectorSettingsActivity : BindingSettingsActivity<AutoSelector>() {
             AutoSelectorChecks.autoSelectorUrl(stored.testURL).isNotEmpty() ||
             AutoSelectorChecks.autoSelectorUrl(stored.connectivityURL).isNotEmpty()
         ) advancedExpanded = true
+        tierRows.clear()
+        renumberRows()
         setupGroups()
+        setupCustomNodes()
         setupTexts()
         for (field in intFields) setupInt(field)
+        findPreference<ListPreference>(KEY_STRATEGY)?.summaryProvider = Preference.SummaryProvider<ListPreference> {
+            getString(
+                if (it.value == AutoSelector.STRATEGY_PRIORITY) R.string.autosel_strategy_priority_tip
+                else R.string.autosel_strategy_latency_tip
+            )
+        }
+        findPreference<Preference>(KEY_TIERS)?.setOnPreferenceClickListener {
+            editTier(-1)
+            true
+        }
         // The change listeners run before the new value is stored, so the state comes from their arguments.
         onSwitch("balance") {
             balanceOn = it
@@ -226,6 +316,12 @@ class AutoSelectorSettingsActivity : BindingSettingsActivity<AutoSelector>() {
             balanceMode = it
             refreshBalance()
         }
+        onMenu(KEY_STRATEGY) {
+            strategy = it
+            refreshStrategy()
+            refreshBalance()
+        }
+        onSwitch("passive") { findPreference<Preference>("siteMemoryMins")?.isEnabled = it }
         findPreference<Preference>(KEY_PINNED)?.setOnPreferenceClickListener {
             MaterialAlertDialogBuilder(this@AutoSelectorSettingsActivity)
                 .setTitle(R.string.autosel_pinned)
@@ -266,16 +362,20 @@ class AutoSelectorSettingsActivity : BindingSettingsActivity<AutoSelector>() {
         val checked = checkedIds()
         val entries = ArrayList<CharSequence>()
         val values = ArrayList<CharSequence>()
+        val listed = ArrayList<Pair<Long, CharSequence>>()
         for (group in groups) {
             if (group.archive && group.id !in checked) continue
             entries.add(if (group.archive) getString(R.string.autosel_group_archived, group.displayName()) else group.displayName())
             values.add(group.id.toString())
+            listed.add(group.id to entries.last())
         }
         for (id in checkedGroups(ensureEditingOutbound().gids)) {
             if (id in knownGroups) continue
             entries.add(getString(R.string.autosel_group_missing, id))
             values.add(id.toString())
+            listed.add(id to entries.last())
         }
+        listedGroups = listed
         pref.entries = entries.toTypedArray()
         pref.entryValues = values.toTypedArray()
         pref.summaryProvider = Preference.SummaryProvider<MultiSelectListPreference> { p ->
@@ -297,6 +397,327 @@ class AutoSelectorSettingsActivity : BindingSettingsActivity<AutoSelector>() {
         val out = order.filterTo(ArrayList()) { it in checked }
         for (id in previous + checked.sorted()) if (id in checked && id !in out) out.add(id)
         return out
+    }
+
+    private val selectProfileForAdd =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode == RESULT_OK) {
+                val id = result.data?.getLongExtra(ProfileSelectActivity.EXTRA_PROFILE_ID, 0L) ?: 0L
+                if (id > 0) {
+                    addCustomNode(id)
+                }
+            }
+        }
+
+    private fun checkedPids(): ArrayList<Long> = DataStore.profileCacheStore.getStringSet(KEY_PIDS).orEmpty()
+        .mapNotNullTo(ArrayList()) { text -> text.trim().toLongOrNull()?.takeIf { it >= 0 } }
+
+    private fun savePids(list: List<Long>) {
+        DataStore.profileCacheStore.putStringSet(KEY_PIDS, list.mapTo(LinkedHashSet()) { it.toString() })
+        val pref = fragment?.findPreference<Preference>(KEY_PIDS)
+        if (pref != null) updateCustomNodesSummary(pref)
+        runOnMainDispatcher { refreshPlan() }
+    }
+
+    private fun addCustomNode(id: Long) {
+        val current = checkedPids()
+        if (id in current) {
+            Snackbar.make(findViewById(android.R.id.content), R.string.autosel_custom_nodes_already_added, Snackbar.LENGTH_SHORT).show()
+            return
+        }
+        current.add(id)
+        savePids(current)
+        val name = ProfileManager.getProfile(id)?.displayName() ?: id.toString()
+        Snackbar.make(findViewById(android.R.id.content), getString(R.string.autosel_custom_nodes_added, name), Snackbar.LENGTH_SHORT).show()
+        showCustomNodesDialog()
+    }
+
+    private fun PreferenceFragmentCompat.setupCustomNodes() {
+        val pref = findPreference<Preference>(KEY_PIDS) ?: return
+        updateCustomNodesSummary(pref)
+        pref.setOnPreferenceClickListener {
+            showCustomNodesDialog()
+            true
+        }
+    }
+
+    private fun updateCustomNodesSummary(pref: Preference) {
+        val pids = checkedPids()
+        if (pids.isEmpty()) {
+            pref.summary = getString(R.string.autosel_custom_nodes_summary_none)
+        } else {
+            lifecycleScope.launch {
+                val names = withContext(Dispatchers.IO) {
+                    pids.map { id ->
+                        ProfileManager.getProfile(id)?.displayName() ?: getString(R.string.autosel_node_missing, id)
+                    }
+                }
+                val preview = names.take(3).joinToString(getString(R.string.autosel_list_separator))
+                val suffix = if (names.size > 3) "..." else ""
+                pref.summary = getString(R.string.autosel_custom_nodes_summary, pids.size, "$preview$suffix")
+            }
+        }
+    }
+
+    private fun showCustomNodesDialog() {
+        val pids = checkedPids()
+        val nodeItems = ArrayList<Pair<Long, String>>()
+        for (pid in pids) {
+            val entity = ProfileManager.getProfile(pid)
+            if (entity != null) {
+                val groupName = GroupRepo.get(entity.groupId)?.displayName() ?: ""
+                nodeItems.add(Pair(pid, "${entity.displayName()}  (${entity.displayType()} · $groupName)"))
+            } else {
+                nodeItems.add(Pair(pid, getString(R.string.autosel_node_missing, pid)))
+            }
+        }
+
+        val builder = MaterialAlertDialogBuilder(this)
+        builder.setTitle(R.string.autosel_custom_nodes)
+
+        if (nodeItems.isEmpty()) {
+            builder.setMessage(R.string.autosel_custom_nodes_empty)
+            builder.setPositiveButton(R.string.autosel_custom_nodes_add) { _, _ ->
+                showUnifiedNodePicker()
+            }
+            builder.setNegativeButton(android.R.string.cancel, null)
+            builder.show()
+            return
+        }
+
+        val displayItems = nodeItems.map { "✕  ${it.second}" }.toTypedArray()
+        builder.setItems(displayItems) { _, which ->
+            val target = nodeItems[which]
+            MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.autosel_custom_node_remove_title)
+                .setMessage(getString(R.string.autosel_custom_node_remove_confirm, target.second))
+                .setPositiveButton(R.string.delete) { _, _ ->
+                    val updated = checkedPids().filter { it != target.first }
+                    savePids(updated)
+                    Snackbar.make(findViewById(android.R.id.content), R.string.autosel_custom_nodes_removed, Snackbar.LENGTH_SHORT).show()
+                    showCustomNodesDialog()
+                }
+                .setNegativeButton(android.R.string.cancel, null)
+                .show()
+        }
+
+        builder.setPositiveButton(R.string.autosel_custom_nodes_add) { _, _ ->
+            showUnifiedNodePicker()
+        }
+        builder.setNeutralButton(R.string.autosel_custom_nodes_clear) { _, _ ->
+            MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.autosel_custom_nodes_clear)
+                .setMessage(R.string.autosel_custom_nodes_clear_confirm)
+                .setPositiveButton(R.string.delete) { _, _ ->
+                    savePids(emptyList())
+                    Snackbar.make(findViewById(android.R.id.content), R.string.autosel_custom_nodes_cleared, Snackbar.LENGTH_SHORT).show()
+                    showCustomNodesDialog()
+                }
+                .setNegativeButton(android.R.string.cancel, null)
+                .show()
+        }
+        builder.setNegativeButton(android.R.string.ok, null)
+        builder.show()
+    }
+
+    private fun showUnifiedNodePicker() {
+        val groups = GroupRepo.all().filter { !it.archive }
+        val allProfiles = SagerDatabase.proxyDao.getAll().filter {
+            it.type != "autoselector" && it.type != "chain" && it.id != DataStore.editingId
+        }
+        if (allProfiles.isEmpty()) {
+            Snackbar.make(findViewById(android.R.id.content), R.string.autosel_no_nodes_available, Snackbar.LENGTH_SHORT).show()
+            return
+        }
+
+        val groupMap = groups.associateBy { it.id }
+        val profilesByGroup = allProfiles.groupBy { it.groupId }
+        val availableGroups = groups.filter { (profilesByGroup[it.id]?.size ?: 0) > 0 }
+
+        val selected = LinkedHashSet(checkedPids())
+        var currentGid = -1L
+        var filterText = ""
+
+        fun getFilteredList(): List<ProxyEntity> {
+            val base = if (currentGid == -1L) allProfiles else (profilesByGroup[currentGid] ?: emptyList())
+            if (filterText.isBlank()) return base
+            return base.filter { it.displayName().contains(filterText, ignoreCase = true) }
+        }
+
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp2px(16), dp2px(10), dp2px(16), 0)
+        }
+
+        val chipScroll = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            overScrollMode = android.view.View.OVER_SCROLL_NEVER
+        }
+        val chipLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+        }
+        chipScroll.addView(chipLayout)
+        container.addView(chipScroll)
+
+        val searchEdit = EditText(this).apply {
+            hint = getString(R.string.autosel_picker_search_hint)
+            setSingleLine(true)
+            textSize = 14f
+            setPadding(dp2px(8), dp2px(10), dp2px(8), dp2px(10))
+        }
+        container.addView(searchEdit)
+
+        val actionRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp2px(4), 0, dp2px(6))
+        }
+        val selectAllBtn = TextView(this).apply {
+            text = getString(R.string.autosel_picker_select_all)
+            setTextColor(ContextCompat.getColor(this@AutoSelectorSettingsActivity, R.color.material_blue_500))
+            textSize = 13f
+            setPadding(0, dp2px(4), dp2px(16), dp2px(4))
+        }
+        val deselectAllBtn = TextView(this).apply {
+            text = getString(R.string.autosel_picker_deselect_all)
+            setTextColor(ContextCompat.getColor(this@AutoSelectorSettingsActivity, R.color.material_blue_500))
+            textSize = 13f
+            setPadding(dp2px(8), dp2px(4), dp2px(16), dp2px(4))
+        }
+        actionRow.addView(selectAllBtn)
+        actionRow.addView(deselectAllBtn)
+        container.addView(actionRow)
+
+        val recyclerView = RecyclerView(this).apply {
+            layoutManager = LinearLayoutManager(this@AutoSelectorSettingsActivity)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp2px(320)
+            )
+        }
+        container.addView(recyclerView)
+
+        var currentItems = getFilteredList()
+        val adapter = object : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
+            override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
+                val itemView = layoutInflater.inflate(R.layout.layout_rule_set_item, parent, false)
+                return object : RecyclerView.ViewHolder(itemView) {}
+            }
+
+            override fun getItemCount(): Int = currentItems.size
+
+            override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
+                val item = currentItems[position]
+                val check = holder.itemView.findViewById<MaterialCheckBox>(R.id.check)
+                val name = holder.itemView.findViewById<TextView>(R.id.name)
+                val source = holder.itemView.findViewById<TextView>(R.id.source)
+
+                check.isChecked = item.id in selected
+                name.text = item.displayName()
+                val gName = groupMap[item.groupId]?.displayName() ?: ""
+                source.text = "${item.displayType()} · $gName"
+
+                val toggle = {
+                    if (item.id in selected) {
+                        selected.remove(item.id)
+                    } else {
+                        selected.add(item.id)
+                    }
+                    check.isChecked = item.id in selected
+                }
+                holder.itemView.setOnClickListener { toggle() }
+                check.setOnClickListener { toggle() }
+            }
+        }
+        recyclerView.adapter = adapter
+
+        val groupButtons = ArrayList<Pair<Long, TextView>>()
+        fun refreshChips() {
+            for ((gid, tv) in groupButtons) {
+                val isCurrent = gid == currentGid
+                val gd = GradientDrawable().apply {
+                    cornerRadius = dp2px(14).toFloat()
+                    if (isCurrent) {
+                        setColor(0xFF1976D2.toInt())
+                    } else {
+                        setColor(0x1F888888.toInt())
+                    }
+                }
+                tv.background = gd
+                tv.setTextColor(if (isCurrent) Color.WHITE else 0xFF444444.toInt())
+            }
+        }
+
+        fun updateList() {
+            currentItems = getFilteredList()
+            adapter.notifyDataSetChanged()
+        }
+
+        val allBtn = TextView(this).apply {
+            text = "${getString(R.string.autosel_picker_all_groups)} (${allProfiles.size})"
+            textSize = 13f
+            setPadding(dp2px(12), dp2px(6), dp2px(12), dp2px(6))
+            setOnClickListener {
+                currentGid = -1L
+                refreshChips()
+                updateList()
+            }
+        }
+        groupButtons.add(Pair(-1L, allBtn))
+        chipLayout.addView(allBtn)
+
+        for (g in availableGroups) {
+            val count = profilesByGroup[g.id]?.size ?: 0
+            val gBtn = TextView(this).apply {
+                text = "${g.displayName()} ($count)"
+                textSize = 13f
+                setPadding(dp2px(12), dp2px(6), dp2px(12), dp2px(6))
+                val lp = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    marginStart = dp2px(6)
+                }
+                layoutParams = lp
+                setOnClickListener {
+                    currentGid = g.id
+                    refreshChips()
+                    updateList()
+                }
+            }
+            groupButtons.add(Pair(g.id, gBtn))
+            chipLayout.addView(gBtn)
+        }
+        refreshChips()
+
+        searchEdit.addTextChangedListener {
+            filterText = it?.toString().orEmpty().trim()
+            updateList()
+        }
+
+        selectAllBtn.setOnClickListener {
+            for (item in currentItems) selected.add(item.id)
+            adapter.notifyDataSetChanged()
+        }
+        deselectAllBtn.setOnClickListener {
+            for (item in currentItems) selected.remove(item.id)
+            adapter.notifyDataSetChanged()
+        }
+
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.autosel_picker_title)
+            .setView(container)
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                savePids(selected.toList())
+                Snackbar.make(
+                    findViewById(android.R.id.content),
+                    getString(R.string.autosel_custom_nodes_summary, selected.size, ""),
+                    Snackbar.LENGTH_SHORT
+                ).show()
+                showCustomNodesDialog()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 
     private fun PreferenceFragmentCompat.setupTexts() {
@@ -337,20 +758,154 @@ class AutoSelectorSettingsActivity : BindingSettingsActivity<AutoSelector>() {
         }
     }
 
-    /** updateBalanceEnabled (cpp:220-240). */
+    /** updateBalanceEnabled (cpp:526-546). */
     private fun refreshBalance() {
         val fragment = fragment ?: return
         val on = balanceOn
         val rotating = on && balanceMode != "connection"
         fragment.findPreference<Preference>("balanceMode")?.isEnabled = on
         fragment.findPreference<Preference>("balanceIntervalSec")?.isEnabled = rotating
-        fragment.findPreference<Preference>(KEY_BALANCE_HINT)?.summary = getString(
+        val hint = getString(
             when {
                 !on -> R.string.autosel_balance_hint_off
                 rotating -> R.string.autosel_balance_hint_rotate
                 else -> R.string.autosel_balance_hint_connection
             }
         )
+        fragment.findPreference<Preference>(KEY_BALANCE_HINT)?.summary =
+            if (on && prioritySelected) hint + " " + getString(R.string.autosel_balance_hint_priority) else hint
+    }
+
+    /** updateStrategyControls (cpp:381-389): the tiers only show, and the failback rows only work, in priority order. */
+    private fun refreshStrategy() {
+        val fragment = fragment ?: return
+        fragment.findPreference<Preference>(KEY_TIERS)?.isVisible = prioritySelected
+        for (key in FAILBACK_KEYS) fragment.findPreference<Preference>(key)?.isEnabled = prioritySelected
+        refreshTierRows()
+    }
+
+    // ------------------------------------------------------------------------------------------------ tiers
+
+    /** Top-level rows get [ROW_ORDER_GAP] apart in their XML order, leaving room for the tier rows. */
+    private fun PreferenceFragmentCompat.renumberRows() {
+        val screen = preferenceScreen ?: return
+        for (i in 0 until screen.preferenceCount) screen.getPreference(i).order = (i + 1) * ROW_ORDER_GAP
+    }
+
+    private fun putTiers(tiers: List<AutoSelector.Tier>) {
+        val array = JsonArray()
+        for (tier in tiers) array.add(jsonObjectOf("gid" to tier.gid, "name_filter" to tier.nameFilter))
+        DataStore.profileCacheStore.putString(KEY_TIERS, jsonObjectOf("tiers" to array).toCompact())
+    }
+
+    /** The tiers as edited, read back the way the profile parses them. */
+    private fun cachedTiers(): MutableList<AutoSelector.Tier> {
+        val parsed = AutoSelector()
+        parsed.parseFromJson(JsonInput.parseObject(DataStore.profileCacheStore.getString(KEY_TIERS).orEmpty()))
+        return parsed.tiers
+    }
+
+    /** setTierRows: one row per tier between the strategy and "Add tier", each opening [editTier]. */
+    private fun refreshTierRows() {
+        val fragment = fragment ?: return
+        val screen = fragment.preferenceScreen ?: return
+        val strategyRow = fragment.findPreference<Preference>(KEY_STRATEGY) ?: return
+        for (row in tierRows) screen.removePreference(row)
+        tierRows.clear()
+        for ((i, tier) in cachedTiers().withIndex()) {
+            val row = Preference(fragment.preferenceManager.context)
+            row.key = tierKey(i)
+            row.order = strategyRow.order + 1 + i
+            row.isPersistent = false
+            row.title = getString(R.string.autosel_tier_title, i + 1)
+            row.summary = tier.label()
+            row.isVisible = prioritySelected
+            row.setOnPreferenceClickListener {
+                editTier(i)
+                true
+            }
+            screen.addPreference(row)
+            tierRows.add(row)
+        }
+        form?.refresh()
+    }
+
+    /**
+     * A tier of the table (appendTierRow, tier_remove, moveTier): its group ("Any group", the groups "Servers from"
+     * lists, a stored unlisted one kept) and name pattern; [index] -1 appends a new one.
+     */
+    private fun editTier(index: Int) {
+        val tiers = cachedTiers()
+        val tier = tiers.getOrNull(index) ?: AutoSelector.Tier()
+        val ids = arrayListOf(-1L)
+        val names = arrayListOf<CharSequence>(getString(R.string.autosel_tier_any_group))
+        for ((id, name) in listedGroups) {
+            ids.add(id)
+            names.add(name)
+        }
+        // Kept selectable so saving never turns a tier for an unlisted group into "any group".
+        if (tier.gid >= 0 && tier.gid !in ids) {
+            ids.add(tier.gid)
+            names.add(AutoSelector.Tier(tier.gid).label())
+        }
+        var chosen = ids.indexOf(tier.gid).coerceAtLeast(0)
+
+        val binding = LayoutAutoSelectorTierBinding.inflate(layoutInflater)
+        binding.group.setAdapter(ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, names))
+        binding.group.setText(names[chosen], false)
+        binding.group.setOnItemClickListener { _, _, position, _ -> chosen = position }
+        binding.names.doAfterTextChanged {
+            binding.namesLayout.error = Validation.regex(it?.toString().orEmpty()).ifEmpty { null }
+        }
+        binding.names.setText(tier.nameFilter)
+        binding.move.isVisible = index >= 0
+        binding.moveUp.isEnabled = index > 0
+        binding.moveDown.isEnabled = index >= 0 && index < tiers.size - 1
+
+        fun edited() = AutoSelector.Tier(ids[chosen], binding.names.text?.toString().orEmpty().trim())
+        val builder = MaterialAlertDialogBuilder(this)
+            .setTitle(getString(R.string.autosel_tier_title, (if (index >= 0) index else tiers.size) + 1))
+            .setView(binding.root)
+            .setPositiveButton(android.R.string.ok) { _, _ -> applyTier(index, edited(), 0) }
+            .setNegativeButton(android.R.string.cancel, null)
+        if (index >= 0) builder.setNeutralButton(R.string.autosel_tier_remove) { _, _ -> removeTier(index) }
+        val dialog = builder.show()
+        binding.moveUp.setOnClickListener {
+            applyTier(index, edited(), -1)
+            dialog.dismiss()
+        }
+        binding.moveDown.setOnClickListener {
+            applyTier(index, edited(), 1)
+            dialog.dismiss()
+        }
+    }
+
+    /** onTiersChanged: [tier] stored at [index] (-1 appends) and moved by [offset], then the rows, the check and the plan. */
+    private fun applyTier(index: Int, tier: AutoSelector.Tier, offset: Int) {
+        val tiers = cachedTiers()
+        if (index !in tiers.indices) {
+            tiers.add(tier)
+        } else {
+            tiers[index] = tier
+            if (index + offset in tiers.indices) Collections.swap(tiers, index, index + offset)
+        }
+        storeTiers(tiers)
+    }
+
+    private fun removeTier(index: Int) {
+        val tiers = cachedTiers()
+        if (index !in tiers.indices) return
+        tiers.removeAt(index)
+        storeTiers(tiers)
+    }
+
+    // The desktop checks the whole table on every change, so every tier row is revalidated.
+    private fun storeTiers(tiers: List<AutoSelector.Tier>) {
+        putTiers(tiers)
+        refreshTierRows()
+        val form = form ?: return
+        form.revalidate(KEY_TIERS)
+        for (i in tiers.indices) form.revalidate(tierKey(i))
     }
 
     private fun refreshAdvanced() {
@@ -410,12 +965,15 @@ class AutoSelectorSettingsActivity : BindingSettingsActivity<AutoSelector>() {
         val preview = AutoSelector()
         preview.parseFromJson(ensureEditingOutbound().exportToJson())
         preview.gids = checkedGroups(preview.gids)
+        preview.pids = checkedPids()
         preview.nameFilter = store.getString("nameFilter").orEmpty().trim()
         preview.countryFilter = store.getString("countryFilter").orEmpty().trim()
         preview.excludeUnavailable = store.getBoolean("excludeUnavailable", true)
         store.getString("poolCap")?.trim()?.toIntOrNull()?.let { preview.poolCap = it }
         store.getString("buildLimit")?.trim()?.toIntOrNull()?.let { preview.buildLimit = it }
         store.getString("resultValidityMins")?.trim()?.toIntOrNull()?.let { preview.resultValidityMins = it }
+        store.getString(KEY_STRATEGY)?.let { preview.strategy = it }
+        preview.tiers = cachedTiers()
         val selectorId = DataStore.editingId
         planJob?.cancel()
         planJob = lifecycleScope.launch {
@@ -446,17 +1004,39 @@ class AutoSelectorSettingsActivity : BindingSettingsActivity<AutoSelector>() {
                 getString(R.string.autosel_plan_counts, plan.eligible, plan.membersInGroup, plan.build.size)
             }
         )
+        val separator = getString(R.string.autosel_list_separator)
+        if (plan.tierBuilt.isNotEmpty()) {
+            val rest = plan.tierBuilt.size - 1
+            val counts = ArrayList<String>()
+            val empty = ArrayList<String>()
+            val crowded = ArrayList<String>()
+            for (i in 0..rest) {
+                val tier = if (i < rest) (i + 1).toString() else getString(R.string.autosel_tier_everything_else)
+                counts.add(getString(R.string.autosel_plan_tier_count, tier, plan.tierBuilt[i]))
+                if (i < rest && plan.tierBuilt[i] == 0) {
+                    (if (plan.tierEligible.getOrElse(i) { 0 } > 0) crowded else empty).add((i + 1).toString())
+                }
+            }
+            lines.add(getString(R.string.autosel_plan_by_tier, counts.joinToString(separator)))
+            if (empty.size == 1) lines.add(getString(R.string.autosel_plan_tier_empty, empty[0]))
+            if (empty.size > 1) lines.add(getString(R.string.autosel_plan_tiers_empty, empty.joinToString(separator)))
+            if (crowded.size == 1) lines.add(getString(R.string.autosel_plan_tier_crowded, crowded[0]))
+            if (crowded.size > 1) lines.add(getString(R.string.autosel_plan_tiers_crowded, crowded.joinToString(separator)))
+        }
         if (plan.missingGroups > 0) {
             lines.add(resources.getQuantityString(R.plurals.autosel_plan_missing_groups, plan.missingGroups, plan.missingGroups))
         }
         if (plan.skipped.isNotEmpty()) {
-            val reasons = plan.skipped.joinToString(getString(R.string.autosel_list_separator)) { (skip, count) ->
+            val reasons = plan.skipped.joinToString(separator) { (skip, count) ->
                 getString(R.string.autosel_plan_skip_item, count, getString(skipText(skip)))
             }
             lines.add(getString(R.string.autosel_plan_skipped, reasons))
         }
         if (plan.keptUnavailable > 0) lines.add(getString(R.string.autosel_plan_kept_unavailable, plan.keptUnavailable))
-        if (plan.truncated) lines.add(getString(R.string.autosel_plan_truncated, plan.poolCapUsed))
+        if (plan.truncated) {
+            val text = if (plan.tierBuilt.isNotEmpty()) R.string.autosel_plan_truncated_tiers else R.string.autosel_plan_truncated
+            lines.add(getString(text, plan.poolCapUsed))
+        }
         if (plan.rankedByTest > 0) lines.add(getString(R.string.autosel_plan_reused, plan.rankedByTest))
         if (plan.needsRanking) lines.add(getString(R.string.autosel_plan_needs_ranking))
         return lines.joinToString(" ")

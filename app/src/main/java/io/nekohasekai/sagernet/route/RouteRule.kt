@@ -218,7 +218,10 @@ class RouteRule {
                 }
             }
         }
-        if (act == "sniff" && sniff_override_dest) obj["override_destination"] = true
+        if (act == "sniff") {
+            if (sniff_override_dest) obj["override_destination"] = true
+            if (sniffers.isNotEmpty()) obj["sniffer"] = JsonValues.stringArray(sniffers)
+        }
         if (act == "resolve" && strategy.isNotBlank()) obj["strategy"] = strategy.trim()
         return obj
     }
@@ -673,7 +676,7 @@ class RouteRule {
          */
         @JvmStatic
         fun outboundProblem(id: Long, profiles: ProfileProvider?): String {
-            if (id == OutboundIds.PROXY || id == OutboundIds.DIRECT || id == OutboundIds.WARP_BYPASS) return ""
+            if (id == OutboundIds.PROXY || id == OutboundIds.DIRECT || id == OutboundIds.BLOCK || id == OutboundIds.WARP_BYPASS) return ""
             if (id < 0) return vtr(R.string.validation_route_outbound_invalid)
             if (profiles == null) return ""
             val ent = profiles.get(id) ?: return vtr(R.string.validation_route_outbound_missing)
@@ -685,6 +688,7 @@ class RouteRule {
             for (hopId in hops) {
                 val hop = profiles.get(hopId)
                 if (hop == null || hop.type == "chain" || unroutable(hop)) return vtr(R.string.validation_route_outbound_chain_hop, name)
+                if (hop.type == "autoselector") return vtr(R.string.validation_route_outbound_chain_selector, name)
             }
             return ""
         }

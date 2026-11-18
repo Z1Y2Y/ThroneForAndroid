@@ -87,6 +87,7 @@ class BaseService {
                 Action.SWITCH_PREVIOUS -> service.switchRelative(-1)
                 Action.SWITCH_PROFILE -> service.switchProfile(intent.getLongExtra(Action.EXTRA_PROFILE_ID, 0L))
                 Action.REFRESH_WIFI_STATE -> afterStart { refreshWifiState(ctx) }
+                Action.REFRESH_NOTIFICATION -> refreshNotification()
                 Action.AUTO_SELECTOR_AUTOMATIC -> AutoSelectorRuntime.releasePin(intent.getLongExtra(Action.EXTRA_PROFILE_ID, 0L))
                 PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED -> afterStart { applyIdleMode() }
 
@@ -100,6 +101,20 @@ class BaseService {
                         }
                     }
                 }
+            }
+        }
+
+        private fun refreshNotification() {
+            val shown = notification ?: return
+            val running = proxy
+            runOnMainDispatcher {
+                var oldTitle: String? = null
+                val newTitle = running?.let { p ->
+                    oldTitle = p.displayProfileName
+                    withContext(Dispatchers.IO) { ServiceNotification.genTitle(p.profile) }
+                        .also { p.displayProfileName = it }
+                }
+                if (notification === shown) shown.reloadSettings(oldTitle, newTitle)
             }
         }
 
@@ -119,30 +134,63 @@ class BaseService {
 
         /** A plain stop asked for while a restart was stopping the old core: the restart ends stopped instead. */
         var stopRequested = false
+        var startRequestedWhileStopping = false
+
+        private var wakeLock: PowerManager.WakeLock? = null
+
+        fun acquireWakeLock() {
+            try {
+                if (wakeLock == null) {
+                    val pm = (service as Context).getSystemService(Context.POWER_SERVICE) as PowerManager
+                    wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Throne:VpnKeepAlive").apply {
+                        setReferenceCounted(false)
+                    }
+                }
+                if (wakeLock?.isHeld == false) {
+                    wakeLock?.acquire()
+                    Logs.i("[KeepAlive] Partial WakeLock acquired")
+                }
+            } catch (e: Throwable) {
+                Logs.w("[KeepAlive] Failed to acquire WakeLock: ${e.message}")
+            }
+        }
+
+        fun releaseWakeLock() {
+            try {
+                if (wakeLock?.isHeld == true) {
+                    wakeLock?.release()
+                    Logs.i("[KeepAlive] Partial WakeLock released")
+                }
+            } catch (e: Throwable) {
+                Logs.w("[KeepAlive] Failed to release WakeLock: ${e.message}")
+            }
+        }
 
         fun changeState(s: State, msg: String? = null) {
             if (state == s && msg == null) return
             state = s
             DataStore.serviceState = s
+            if (s == State.Connected) {
+                acquireWakeLock()
+            } else if (s == State.Stopped || s == State.Idle) {
+                releaseWakeLock()
+            }
             binder.stateChanged(s, msg)
             Widgets.push(service as Context)
         }
 
         /** Reads the idle mode when the job runs, so the last of several quick events always wins. */
         private fun applyIdleMode() = runOnDefaultDispatcher {
+            // Keep proxy core running smoothly across idle/wake transitions.
+            // Do NOT pause the core in Doze mode or reset network connections on wake,
+            // which causes network drops and disconnects background apps upon unlocking.
             idleLock.withLock {
                 val box = proxy?.boxOrNull ?: return@withLock
-                if (SagerNet.power.isDeviceIdleMode) {
-                    if (pausedBox !== box) {
-                        box.pause()
-                        pausedBox = box
-                    }
-                } else if (pausedBox === box) {
+                if (pausedBox === box) {
                     pausedBox = null
-                    box.wake()
-                    if (DataStore.configurationStore.getBoolean(Key.WAKE_RESET_CONNECTIONS, true)) {
-                        box.resetNetwork()
-                    }
+                    try {
+                        box.wake()
+                    } catch (_: Throwable) {}
                 }
             }
         }
@@ -304,6 +352,10 @@ class BaseService {
             when {
                 s == State.Stopped -> startRunner()
                 s.canStop -> AutoSelectorRuntime.restart(this) { stopRunner(true) }
+                s == State.Stopping -> {
+                    Logs.i("reload invoked while Stopping, queuing pending start")
+                    data.startRequestedWhileStopping = true
+                }
                 else -> Logs.w("Illegal state $s when invoking use")
             }
         }
@@ -334,6 +386,11 @@ class BaseService {
 
         fun startRunner() {
             this as Context
+            if (data.state == State.Stopping) {
+                Logs.i("startRunner called while Stopping, queuing pending start")
+                data.startRequestedWhileStopping = true
+                return
+            }
             if (Build.VERSION.SDK_INT >= 26) startForegroundService(Intent(this, javaClass))
             else startService(Intent(this, javaClass))
         }
@@ -382,6 +439,8 @@ class BaseService {
             } catch (error: Throwable) {
                 recordCleanupFailure("network-listener-stop", error)
             }
+
+            data.releaseWakeLock()
 
             Logs.i(
                 "ServiceLifecycleTrace serviceId=$serviceId proxyId=$proxyId " +
@@ -523,15 +582,22 @@ class BaseService {
                     AutoSelectorRuntime.serviceStopped()
                 }
 
+                val queuedStart = data.startRequestedWhileStopping
+                data.startRequestedWhileStopping = false
+
                 try {
                     when {
                         keepNotification -> startProxy()
                         finishRestart -> startRunner()
+                        queuedStart -> {
+                            Logs.i("Executing queued start command after stopping completed")
+                            startProxy()
+                        }
                         else -> stopSelf() // stop the service if nothing has bound to it
                     }
                 } catch (error: Throwable) {
                     recordCleanupFailure("service-finish", error)
-                    if (keepNotification) {
+                    if (keepNotification || queuedStart) {
                         failRunner("${getString(R.string.service_failed)} ${error.readableMessage}")
                     }
                 }
@@ -566,6 +632,7 @@ class BaseService {
             DefaultNetworkListener.start(this) { network ->
                 if (network == null) {
                     SagerNet.underlyingNetwork = null
+                    upstreamInterfaceName = null
                     DataStore.vpnService?.updateUnderlyingNetwork()
                     return@start
                 }
@@ -607,6 +674,11 @@ class BaseService {
         fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
             DataStore.baseService = this
 
+            if (data.state == State.Stopping) {
+                Logs.i("Service received start command while Stopping, queuing pending start")
+                data.startRequestedWhileStopping = true
+                return Service.START_NOT_STICKY
+            }
             if (data.state != State.Stopped) return Service.START_NOT_STICKY
             startProxy()
             return Service.START_NOT_STICKY
@@ -616,6 +688,7 @@ class BaseService {
         fun startProxy() {
             DataStore.baseService = this
             val data = data
+            data.startRequestedWhileStopping = false
             val profile = SagerDatabase.proxyDao.getById(DataStore.selectedProxy)
             this as Context
             if (profile == null) { // gracefully shutdown: https://stackoverflow.com/q/47337857/2245107
@@ -641,6 +714,7 @@ class BaseService {
                     addAction(Action.SWITCH_PREVIOUS)
                     addAction(Action.SWITCH_PROFILE)
                     addAction(Action.REFRESH_WIFI_STATE)
+                    addAction(Action.REFRESH_NOTIFICATION)
                     addAction(Action.AUTO_SELECTOR_AUTOMATIC)
                 }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {

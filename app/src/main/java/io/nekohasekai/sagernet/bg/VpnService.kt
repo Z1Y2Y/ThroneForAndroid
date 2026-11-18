@@ -85,7 +85,11 @@ class VpnService : BaseVpnService(),
     override val data = BaseService.Data(this)
     override val tag = "SagerNetVpnService"
     override fun createNotification(profileName: String) =
-        ServiceNotification(this, profileName, "service-vpn")
+        ServiceNotification(
+            this, profileName,
+            if (DataStore.liveUpdateEnabled) "service-live-update" else "service-vpn",
+            DataStore.liveUpdateEnabled
+        )
 
     private fun isAlwaysOnVpn(): Boolean =
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && runCatching { isAlwaysOn }.getOrDefault(false)
@@ -208,11 +212,15 @@ class VpnService : BaseVpnService(),
 
     fun updateUnderlyingNetwork(builder: Builder? = null) {
         val networks = SagerNet.underlyingNetwork?.let { arrayOf(it) }
-        if (builder != null) {
-            if (networks != null) builder.setUnderlyingNetworks(networks)
-        } else {
-            // null once the network is lost: the VPN follows the system default instead of declaring a gone network.
-            setUnderlyingNetworks(networks)
+        try {
+            if (builder != null) {
+                if (networks != null) builder.setUnderlyingNetworks(networks)
+            } else {
+                // null once the network is lost: the VPN follows the system default instead of declaring a gone network.
+                setUnderlyingNetworks(networks)
+            }
+        } catch (e: Exception) {
+            Logs.w("updateUnderlyingNetwork: $e")
         }
     }
 

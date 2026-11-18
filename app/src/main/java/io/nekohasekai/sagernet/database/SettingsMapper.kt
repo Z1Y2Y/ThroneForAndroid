@@ -45,6 +45,9 @@ object SettingsMapper {
     /** GroupsRepo / ProfilesRepo for the auto-selector plan; each group is read once per store. */
     fun selectorStore(): SelectorStore = DatabaseSelectorStore()
 
+    /** The core half of IsValid where the core is loaded (:bg), else null. */
+    fun memberCheck(): MemberCheck? = if (SagerNet.application.isBgProcess) CoreMemberCheck else null
+
     /** The outbound layer's lookups into the database (autoselector.cpp:9-15 DisplayAddress); once per process. */
     fun installOutboundHooks() {
         AutoSelector.groupNames = AutoSelector.GroupNames { gid -> SagerDatabase.groupDao.getById(gid)?.displayName() }
@@ -185,10 +188,25 @@ object SettingsMapper {
 
     private class DatabaseSelectorStore : SelectorStore {
         private val groups = HashMap<Long, SelectorGroup?>()
+        private val memberCache = HashMap<Long, Pair<SelectorMember, SelectorGroup?>?>()
 
         override fun group(gid: Long): SelectorGroup? {
             if (groups.containsKey(gid)) return groups[gid]
             return load(gid).also { groups[gid] = it }
+        }
+
+        override fun member(pid: Long): Pair<SelectorMember, SelectorGroup?>? {
+            if (memberCache.containsKey(pid)) return memberCache[pid]
+            val proxy = if (pid > 0) SagerDatabase.proxyDao.getById(pid) else null
+            if (proxy == null) {
+                memberCache[pid] = null
+                return null
+            }
+            val member = SelectorMember(proxy.id, proxy.outbound, proxy.latency, proxy.latencyAt, proxy.testCountry.orEmpty())
+            val group = if (proxy.groupId > 0) group(proxy.groupId) else null
+            val result = Pair(member, group)
+            memberCache[pid] = result
+            return result
         }
 
         private fun load(gid: Long): SelectorGroup? {

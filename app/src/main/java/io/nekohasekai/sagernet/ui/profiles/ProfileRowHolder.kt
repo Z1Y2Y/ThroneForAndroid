@@ -241,6 +241,7 @@ internal class ProfileRowHolder(view: View, private val adapter: ProfileListAdap
     private val traffic: TextView = view.findViewById(R.id.traffic_text)
     private val error: TextView = view.findViewById(R.id.profile_error)
     private val selectedIndicator: View = view.findViewById(R.id.selected_indicator)
+    private val pinIcon: View = view.findViewById(R.id.pin_icon)
 
     lateinit var profile: ProxyEntity
         private set
@@ -292,6 +293,7 @@ internal class ProfileRowHolder(view: View, private val adapter: ProfileListAdap
         placeholder = false
         val context = itemView.context
         name.text = profile.displayName()
+        pinIcon.isVisible = adapter.isPinned(profile.id)
         type.text = TypeLabel.of(profile)
         type.setTextColor(context.getProtocolColor(profile.type))
         bindContent()
@@ -331,7 +333,7 @@ internal class ProfileRowHolder(view: View, private val adapter: ProfileListAdap
         placeholder = true
         name.text = ""
         type.text = ""
-        for (view in arrayOf(address, result, testProgress, traffic, error, selectCheck, editButton, shareButton, moreButton)) {
+        for (view in arrayOf(address, result, testProgress, traffic, error, selectCheck, editButton, shareButton, moreButton, pinIcon)) {
             view.isVisible = false
         }
         applyCardColors(selected = false, checked = false)
