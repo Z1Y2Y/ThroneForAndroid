@@ -8,6 +8,7 @@
     <string name="app_version">Version</string>
     <string name="version_x">Version (%s)</string>
     <string name="menu_configuration">Profiles</string>
+    <string name="menu_connections">Connections</string>
     <string name="menu_group">Groups</string>
     <string name="menu_about">About</string>
     <string name="theme">Theme</string>
@@ -31,6 +32,17 @@
     <string name="update_all_subscription">Update all subscriptions</string>
     <string name="layout_single_column">Single column</string>
     <string name="layout_double_column">Double column</string>
+    <string name="profiles_sort_appearance">Sort &amp; appearance</string>
+    <string name="profiles_list_display_settings">Profile list display</string>
+    <string name="appearance_sort">Sort</string>
+    <string name="appearance_layout">Layout</string>
+    <string name="profiles_sort_original">Original</string>
+    <string name="profile_card_style">Card style</string>
+    <string name="profile_card_classic">Classic</string>
+    <string name="profile_card_stroke">Stroke</string>
+    <string name="profile_display_mode">Display mode</string>
+    <string name="profile_display_detailed">Detailed</string>
+    <string name="profile_display_concise">Concise</string>
     <!-- misc -->
     <string name="service_mode">Service mode</string>
     <string name="service_mode_proxy">Proxy only</string>
@@ -2134,6 +2146,26 @@
     <string name="diagnostics_notification">Recording a performance profile…</string>
     <!-- B2 live graphs -->
     <string name="live_graphs">Live graphs</string>
+    <string name="connections_title">Connections</string>
+    <string name="connections_refresh">Refresh connections</string>
+    <string name="connection_filter_active">Active %1$d</string>
+    <string name="connection_filter_active_zero">Active 0</string>
+    <string name="connection_filter_closed">Closed %1$d</string>
+    <string name="connection_filter_closed_zero">Closed 0</string>
+    <string name="connection_filter_all">All</string>
+    <string name="connections_search_hint">Search host, app, or rule</string>
+    <string name="connections_summary">Active %1$d · Closed %2$d · ↑ %3$s · ↓ %4$s</string>
+    <string name="connections_empty_active">No active connections</string>
+    <string name="connections_empty_closed">No closed connections</string>
+    <string name="connections_empty_search">No matching connections</string>
+    <string name="connection_unknown_app">Unknown application</string>
+    <string name="connection_unknown_target">Unknown destination</string>
+    <string name="connection_transfer">↑ %1$s · ↓ %2$s · Total ↑ %3$s · ↓ %4$s</string>
+    <string name="connection_chain">Proxy chain: %1$s</string>
+    <string name="connection_direct">direct</string>
+    <string name="connection_closed_at">Closed %1$s ago</string>
+    <string name="connection_close">Close connection</string>
+    <string name="connection_card_description">%1$s to %2$s</string>
     <string name="live_graph_traffic">Traffic</string>
     <string name="live_graph_proxy">Proxy</string>
     <string name="live_graph_direct">Direct</string>

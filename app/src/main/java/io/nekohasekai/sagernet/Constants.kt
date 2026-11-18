@@ -38,6 +38,7 @@ object Key {
     const val GROUP_LAYOUT_MODE = "groupLayoutMode"
     const val COMPACT_PROFILE_ROWS = "compactProfileRows"
     const val COMPACT_GROUP_CARDS = "compactGroupCards"
+    const val PROFILE_CARD_OUTLINE = "profileCardOutline"
 
     const val PROFILE_DIRTY = "profileDirty"
     const val HIDE_UNAVAILABLE_PROFILES = "hideUnavailableProfiles"

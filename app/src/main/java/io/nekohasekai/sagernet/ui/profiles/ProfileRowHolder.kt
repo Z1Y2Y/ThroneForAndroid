@@ -11,6 +11,7 @@ import android.widget.CheckBox
 import android.widget.ImageView
 import android.widget.TextView
 import androidx.annotation.ColorInt
+import androidx.core.content.ContextCompat
 import androidx.core.graphics.ColorUtils
 import androidx.core.view.isVisible
 import androidx.preference.PreferenceDataStore
@@ -372,11 +373,10 @@ internal class ProfileRowHolder(view: View, private val adapter: ProfileListAdap
         val surface = context.getColorAttr(R.attr.colorSurface)
         var background = surface
         selectedIndicator.isVisible = selected
-        // The shadow does not show on OLED black, so that theme outlines the card instead
-        val stroke = context.getColorAttr(R.attr.profileCardStrokeColor)
+        val stroke = if (DataStore.profileCardOutline) ContextCompat.getColor(context, R.color.card_stroke) else 0
         if (stroke != 0) card.strokeColor = stroke
         card.strokeWidth = if (stroke != 0) context.resources.getDimensionPixelSize(R.dimen.card_stroke_width) else 0
-        card.cardElevation = context.resources.getDimension(R.dimen.profile_card_elevation_classic)
+        card.cardElevation = if (DataStore.profileCardOutline) 0f else context.resources.getDimension(R.dimen.profile_card_elevation_classic)
         if (selected) {
             val primary = context.getColorAttr(R.attr.selectedColorPrimary)
             background = ColorUtils.compositeColors(ColorUtils.setAlphaComponent(primary, 20), surface)

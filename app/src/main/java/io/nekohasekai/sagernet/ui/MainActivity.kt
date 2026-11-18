@@ -409,7 +409,7 @@ class MainActivity : ThemedActivity(),
             R.id.nav_traffic -> displayFragment(DashboardFragment())
             R.id.nav_tools -> displayFragment(ToolsFragment())
             R.id.nav_logcat -> displayFragment(LogcatFragment())
-            R.id.nav_live_graphs -> displayFragment(LiveGraphsFragment())
+            R.id.nav_connections -> displayFragment(ConnectionsFragment())
             R.id.nav_faq -> {
                 launchCustomTab("https://throneproj.github.io")
                 return false
@@ -506,7 +506,7 @@ class MainActivity : ThemedActivity(),
         popup.menu.findItem(R.id.action_test_speed_current).isEnabled = DataStore.serviceState.connected
         popup.setOnMenuItemClickListener { item ->
             when (item.itemId) {
-                R.id.action_live_graphs -> displayFragmentWithId(R.id.nav_live_graphs)
+                R.id.action_connections -> displayFragmentWithId(R.id.nav_connections)
                 R.id.action_test_speed_current -> {
                     if (!TestSessionClient.startCurrent(TestSpec.KIND_SPEED)) {
                         snackbar(R.string.profiles_test_busy).show()

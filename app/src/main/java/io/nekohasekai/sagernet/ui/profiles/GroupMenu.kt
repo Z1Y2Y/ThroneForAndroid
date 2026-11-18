@@ -6,6 +6,7 @@ import android.view.View
 import androidx.core.view.MenuCompat
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.bg.test.TestSpec
+import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.GroupSortMethod
 import io.nekohasekai.sagernet.database.ProxyGroup
 import io.nekohasekai.sagernet.database.TestBy
@@ -24,14 +25,41 @@ class GroupMenu(private val host: ConfigurationFragment) {
     fun setUp(menu: Menu) {
         menu.findItem(R.id.action_misc)?.subMenu?.let { miscMenu ->
             MenuCompat.setGroupDividerEnabled(miscMenu, true)
-            miscMenu.findItem(R.id.action_other)?.subMenu?.let { otherMenu ->
-                MenuCompat.setGroupDividerEnabled(otherMenu, true)
+            listOf(R.id.action_remove, R.id.action_sort, R.id.action_show).forEach { itemId ->
+                miscMenu.findItem(itemId)?.subMenu?.let { submenu ->
+                    MenuCompat.setGroupDividerEnabled(submenu, true)
+                }
             }
         }
         keepOpen(menu, R.id.action_sort_ascending) { setDirection(it, false) }
         keepOpen(menu, R.id.action_sort_descending) { setDirection(it, true) }
         keepOpen(menu, R.id.action_show_out_ip) { toggleShown(menu, it) }
         keepOpen(menu, R.id.action_show_speed) { toggleShown(menu, it) }
+        keepOpen(menu, R.id.action_profile_layout_single) {
+            it.isChecked = true
+            host.setDoubleColumn(false)
+        }
+        keepOpen(menu, R.id.action_profile_layout_double) {
+            it.isChecked = true
+            host.setDoubleColumn(true)
+        }
+        keepOpen(menu, R.id.action_profile_card_classic) {
+            it.isChecked = true
+            DataStore.profileCardOutline = false
+            host.refreshProfileAppearance()
+        }
+        keepOpen(menu, R.id.action_profile_card_stroke) {
+            it.isChecked = true
+            DataStore.profileCardOutline = true
+            host.refreshProfileAppearance()
+        }
+        keepOpen(menu, R.id.action_profile_display_concise) {
+            it.isChecked = !it.isChecked
+            host.setCompactRows(it.isChecked)
+        }
+        menu.findItem(if (host.doubleColumn) R.id.action_profile_layout_double else R.id.action_profile_layout_single)?.isChecked = true
+        menu.findItem(if (DataStore.profileCardOutline) R.id.action_profile_card_stroke else R.id.action_profile_card_classic)?.isChecked = true
+        menu.findItem(R.id.action_profile_display_concise)?.isChecked = host.compactRows
     }
 
     /**
@@ -88,6 +116,9 @@ class GroupMenu(private val host: ConfigurationFragment) {
         val group = host.currentGroup()
         menu.findItem(R.id.action_update_subscription)?.isVisible = group?.isSubscription == true
         menu.findItem(R.id.action_test_stop)?.isVisible = host.testState.running
+        menu.findItem(if (host.doubleColumn) R.id.action_profile_layout_double else R.id.action_profile_layout_single)?.isChecked = true
+        menu.findItem(if (DataStore.profileCardOutline) R.id.action_profile_card_stroke else R.id.action_profile_card_classic)?.isChecked = true
+        menu.findItem(R.id.action_profile_display_concise)?.isChecked = host.compactRows
         if (group != null && group.keepsSorted()) sortDescending = group.sort.descending
         menu.findItem(if (sortDescending) R.id.action_sort_descending else R.id.action_sort_ascending)?.isChecked = true
         if (group != null) {
@@ -116,7 +147,6 @@ class GroupMenu(private val host: ConfigurationFragment) {
     fun onMenuItemClick(item: MenuItem): Boolean {
         when (item.itemId) {
             R.id.action_test_stop -> TestSessionClient.stop()
-            R.id.action_layout -> host.setDoubleColumn(!host.doubleColumn)
             else -> return onGroupItemClick(item, host.currentGroup() ?: return false)
         }
         return true

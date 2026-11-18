@@ -26,4 +26,8 @@ interface ISagerNetService {
 
   // The live graphs' points after afterSerial of session (bg.LiveStatsRecorder); another session returns them all.
   LiveStatsBatch liveStats(long session, long afterSerial);
+
+  // Current and recently closed sing-box connections, including app owner, destination and outbound chain.
+  String queryConnections();
+  boolean closeConnection(String id);
 }

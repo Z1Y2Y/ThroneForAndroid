@@ -126,15 +126,12 @@ class ConfigurationFragment : ToolbarFragment(R.layout.layout_group_list),
     private val pickedGroup: Long get() = arguments?.getLong(ARG_PICKED_GROUP) ?: 0L
 
     val alwaysShowAddress by lazy { DataStore.alwaysShowAddress }
-    val compactRows by lazy { DataStore.compactProfileRows }
+    var compactRows = DataStore.compactProfileRows
+        private set
 
-    /**
-     * Double column (groupLayoutMode 1): the compact card, two columns at least (the width may give more). Landscape
-     * only, switched from the toolbar; portrait always lists single column cards.
-     */
+    /** Double column (groupLayoutMode 1): compact cards in at least two columns, available in portrait and landscape. */
     var doubleColumn = false
         private set
-    private var landscape = false
 
     val groupMenu = GroupMenu(this)
     val selection = SelectionMode(this)
@@ -216,8 +213,7 @@ class ConfigurationFragment : ToolbarFragment(R.layout.layout_group_list),
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         val config = resources.configuration
-        landscape = config.screenWidthDp > config.screenHeightDp
-        doubleColumn = landscape && DataStore.groupLayoutMode == 1
+        doubleColumn = !select && DataStore.groupLayoutMode == 1
         readProfileState()
 
         setUpToolbar()
@@ -356,6 +352,8 @@ class ConfigurationFragment : ToolbarFragment(R.layout.layout_group_list),
         if (select) {
             toolbar.menu.findItem(R.id.action_add)?.isVisible = false
             toolbar.menu.findItem(R.id.action_misc)?.isVisible = false
+            toolbar.menu.findItem(R.id.action_test_url)?.isVisible = false
+            toolbar.menu.findItem(R.id.action_test_speed)?.isVisible = false
             arguments?.getInt(ARG_TITLE)?.takeIf { it != 0 }?.let(toolbar::setTitle)
             setNavigationIcon(R.drawable.ic_navigation_close, R.string.navigation_close)
             toolbar.setNavigationOnClickListener { requireActivity().finish() }
@@ -364,7 +362,6 @@ class ConfigurationFragment : ToolbarFragment(R.layout.layout_group_list),
             TvControls.addServerSwitch(toolbar.menu, R.id.group_profiles_toolbar)
             groupMenu.setUp(toolbar.menu)
             imports.prepare(toolbar.menu)
-            updateLayoutAction()
             toolbar.setNavigationOnClickListener {
                 if (selection.active) {
                     selection.finish()
@@ -679,7 +676,6 @@ class ConfigurationFragment : ToolbarFragment(R.layout.layout_group_list),
         if (toolbar != null) {
             toolbar.menu.setGroupVisible(R.id.group_profiles_toolbar, !active)
             toolbar.menu.setGroupVisible(R.id.group_selection_toolbar, active)
-            updateLayoutAction()
             if (active) {
                 searchView?.clearFocus()
                 setNavigationIcon(R.drawable.ic_navigation_close, R.string.navigation_cancel_selection)
@@ -701,19 +697,21 @@ class ConfigurationFragment : ToolbarFragment(R.layout.layout_group_list),
     }
 
     fun setDoubleColumn(value: Boolean) {
-        if (value == doubleColumn || !landscape) return
+        if (value == doubleColumn || select) return
         doubleColumn = value
         runOnDefaultDispatcher { DataStore.groupLayoutMode = if (value) 1 else 0 }
         lists.forEach { it.switchLayout() }
-        updateLayoutAction()
     }
 
-    /** The toolbar's layout switch shows the layout it switches to; setGroupVisible brings it back in portrait too. */
-    private fun updateLayoutAction() {
-        val item = toolbar?.menu?.findItem(R.id.action_layout) ?: return
-        item.isVisible = landscape && !select && !selection.active
-        item.setIcon(if (doubleColumn) R.drawable.ic_baseline_view_list_24 else R.drawable.ic_baseline_grid_view_24)
-        item.setTitle(if (doubleColumn) R.string.layout_single_column else R.string.layout_double_column)
+    fun setCompactRows(value: Boolean) {
+        if (value == compactRows) return
+        compactRows = value
+        runOnDefaultDispatcher { DataStore.compactProfileRows = value }
+        refreshProfileAppearance()
+    }
+
+    fun refreshProfileAppearance() {
+        lists.forEach { it.switchLayout() }
     }
 
     // ------------------------------------------------------------------------------------------------ state

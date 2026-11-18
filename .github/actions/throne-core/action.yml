@@ -18,11 +18,16 @@ runs:
         git -C "$THRONE_DIR" remote add origin https://github.com/throneproj/Throne
         git -C "$THRONE_DIR" fetch -q --depth 1 origin "$REF"
         git -C "$THRONE_DIR" checkout -q --detach FETCH_HEAD
+        CORE_PATCH="$GITHUB_WORKSPACE/buildScript/throne-core-patches/mobile-connections.patch"
+        git -C "$THRONE_DIR" apply --check "$CORE_PATCH"
+        git -C "$THRONE_DIR" apply "$CORE_PATCH"
+        PATCH_SHA=$(sha256sum "$CORE_PATCH" | cut -d' ' -f1)
         {
           echo "THRONE_CORE_REF=$REF"
           echo "THRONE_DIR=$THRONE_DIR"
           echo "THRONE_CORE_SHA=$(git -C "$THRONE_DIR" rev-parse HEAD)"
           echo "THRONE_CORE_SCRIPT_SHA=$(sha256sum "$THRONE_DIR/script/build_android.sh" | cut -d' ' -f1)"
+          echo "THRONE_CORE_PATCH_SHA=$PATCH_SHA"
         } >> "$GITHUB_ENV"
     - name: ThroneCore cache
       id: cache
@@ -31,7 +36,7 @@ runs:
         path: |
           app/libs/ThroneCore.aar
           app/src/main/assets/schema/sing-box.json
-        key: throne-core-${{ env.THRONE_CORE_REF }}-${{ env.THRONE_CORE_SHA }}-${{ env.THRONE_CORE_SCRIPT_SHA }}-${{ hashFiles('.github/actions/throne-core/action.yml') }}
+        key: throne-core-${{ env.THRONE_CORE_REF }}-${{ env.THRONE_CORE_SHA }}-${{ env.THRONE_CORE_SCRIPT_SHA }}-${{ env.THRONE_CORE_PATCH_SHA }}-${{ hashFiles('.github/actions/throne-core/action.yml') }}
     - name: Install Golang
       if: steps.cache.outputs.cache-hit != 'true'
       uses: actions/setup-go@v7
@@ -95,6 +100,9 @@ runs:
         unzip -l "$RUNNER_TEMP/throne-core-classes.jar" > "$RUNNER_TEMP/throne-core-classes.txt"
         grep -q 'io/throneproj/mobile/Mobile.class' "$RUNNER_TEMP/throne-core-classes.txt"
         grep -q 'go/Seq.class' "$RUNNER_TEMP/throne-core-classes.txt"
+        javap -classpath "$RUNNER_TEMP/throne-core-classes.jar" io.throneproj.mobile.Instance > "$RUNNER_TEMP/throne-mobile-api.txt"
+        grep -q 'queryConnections()' "$RUNNER_TEMP/throne-mobile-api.txt"
+        grep -q 'closeConnection(java.lang.String)' "$RUNNER_TEMP/throne-mobile-api.txt"
         # the APK splits (buildSrc Helpers.kt) must match the core targets
         for abi in arm64-v8a armeabi-v7a x86_64; do
           grep -q "jni/$abi/libthrone.so" "$RUNNER_TEMP/throne-core-aar.txt" \

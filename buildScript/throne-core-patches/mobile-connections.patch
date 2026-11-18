@@ -1,0 +1,105 @@
+diff --git a/core/mobile/connections.go b/core/mobile/connections.go
+new file mode 100644
+--- /dev/null
++++ b/core/mobile/connections.go
+@@ -0,0 +1,100 @@
++package mobile
++
++import (
++	"encoding/json"
++
++	"github.com/gofrs/uuid/v5"
++	"github.com/sagernet/sing-box/common/trafficcontrol"
++)
++
++type mobileConnectionSnapshot struct {
++	Active []*mobileConnectionRecord `json:"active"`
++	Closed []*mobileConnectionRecord `json:"closed"`
++}
++
++type mobileConnectionRecord struct {
++	ID           string   `json:"id"`
++	CreatedAt    int64    `json:"createdAt"`
++	ClosedAt     int64    `json:"closedAt"`
++	Upload       int64    `json:"upload"`
++	Download     int64    `json:"download"`
++	Outbound     string   `json:"outbound"`
++	OutboundType string   `json:"outboundType"`
++	Network      string   `json:"network"`
++	Source       string   `json:"source"`
++	Destination  string   `json:"destination"`
++	Protocol     string   `json:"protocol"`
++	Domain       string   `json:"domain"`
++	Chain        []string `json:"chain"`
++	ProcessPaths []string `json:"processPaths"`
++	Packages     []string `json:"packages"`
++	OwnerUID     int32    `json:"ownerUid"`
++}
++
++func mobileConnection(metadata *trafficcontrol.TrackerMetadata) *mobileConnectionRecord {
++	record := &mobileConnectionRecord{
++		ID:           metadata.ID.String(),
++		CreatedAt:    metadata.CreatedAt.UnixMilli(),
++		Outbound:     metadata.Outbound,
++		OutboundType: metadata.OutboundType,
++		Network:      metadata.Metadata.Network,
++		Source:       metadata.Metadata.Source.String(),
++		Destination:  metadata.Metadata.Destination.String(),
++		Protocol:     metadata.Metadata.Protocol,
++		Domain:       metadata.Metadata.Domain,
++		Chain:        append([]string(nil), metadata.Chain...),
++	}
++	if metadata.Upload != nil {
++		record.Upload = metadata.Upload.Load()
++	}
++	if metadata.Download != nil {
++		record.Download = metadata.Download.Load()
++	}
++	if !metadata.ClosedAt.IsZero() {
++		record.ClosedAt = metadata.ClosedAt.UnixMilli()
++	}
++	if owner := metadata.Metadata.ProcessInfo; owner != nil {
++		record.ProcessPaths = append([]string(nil), owner.ProcessPaths...)
++		record.Packages = append([]string(nil), owner.PackageNames...)
++		record.OwnerUID = owner.UserId
++	}
++	return record
++}
++
++// QueryConnections exposes the current and recently closed connection metadata to Android.
++func (i *Instance) QueryConnections() string {
++	snapshot := mobileConnectionSnapshot{
++		Active: make([]*mobileConnectionRecord, 0),
++		Closed: make([]*mobileConnectionRecord, 0),
++	}
++	if i.traffic == nil {
++		return `{"active":[],"closed":[]}`
++	}
++	for _, connection := range i.traffic.Connections() {
++		snapshot.Active = append(snapshot.Active, mobileConnection(connection))
++	}
++	for _, connection := range i.traffic.ClosedConnections() {
++		snapshot.Closed = append(snapshot.Closed, mobileConnection(connection))
++	}
++	encoded, err := json.Marshal(snapshot)
++	if err != nil {
++		return `{"active":[],"closed":[]}`
++	}
++	return string(encoded)
++}
++
++// CloseConnection closes an active connection by its UUID.
++func (i *Instance) CloseConnection(id string) bool {
++	if i.traffic == nil {
++		return false
++	}
++	connectionID, err := uuid.FromString(id)
++	if err != nil {
++		return false
++	}
++	connection := i.traffic.Connection(connectionID)
++	if connection == nil {
++		return false
++	}
++	return connection.Close() == nil
++}

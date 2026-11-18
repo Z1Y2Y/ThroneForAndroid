@@ -254,6 +254,27 @@ class BaseService {
 
         override fun liveStats(session: Long, afterSerial: Long): LiveStatsBatch = LiveStatsRecorder.batch(session, afterSerial)
 
+        override fun queryConnections(): String {
+            val box = data?.takeIf { it.state.connected }?.proxy?.boxOrNull
+                ?: return """{"active":[],"closed":[]}"""
+            return try {
+                box.queryConnections()
+            } catch (e: Throwable) {
+                Logs.w(e)
+                """{"active":[],"closed":[]}"""
+            }
+        }
+
+        override fun closeConnection(id: String): Boolean {
+            val box = data?.takeIf { it.state.connected }?.proxy?.boxOrNull ?: return false
+            return try {
+                box.closeConnection(id)
+            } catch (e: Throwable) {
+                Logs.w(e)
+                false
+            }
+        }
+
         fun stateChanged(s: State, msg: String?) = launch {
             val profileName = profileName
             broadcast { it.stateChanged(s.ordinal, profileName, msg) }
