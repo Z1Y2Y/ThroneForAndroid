@@ -515,7 +515,7 @@ class RouteRuleActivity : ThemedActivity(R.layout.layout_config_settings), OnPre
             return if (items.size > max) shown + separator + "…" else shown
         }
 
-        /** proxy, direct, block, warp-bypass, select profile, and every server as "[group] name". */
+        /** Fixed outbounds, the current server label, and a separate profile picker. */
         fun setupOutbounds() {
             val pref = findPreference<SimpleMenuPreference>("outbound_id") ?: return
             val current = pref.value?.toLongOrNull() ?: OutboundIds.DIRECT
@@ -534,10 +534,10 @@ class RouteRuleActivity : ThemedActivity(R.layout.layout_config_settings), OnPre
             entries.add(getString(R.string.route_outbound_select_profile))
             values.add("SELECT_PROFILE")
 
-            if (current > 0 && host.servers.none { it.first == current }) {
-                add(getString(R.string.route_rule_missing_server, current), current)
+            if (current > 0) {
+                val currentServer = host.servers.firstOrNull { it.first == current }
+                add(currentServer?.second ?: getString(R.string.route_rule_missing_server, current), current)
             }
-            for ((id, label) in host.servers) add(label, id)
 
             pref.entries = entries.toTypedArray()
             pref.entryValues = values.toTypedArray()
