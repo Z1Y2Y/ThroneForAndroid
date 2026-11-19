@@ -658,7 +658,17 @@
         <item name="primaryOrTextPrimary">?android:textColorPrimary</item>
     </style>
 
-    <!-- AMOLED black overlay: applied at night by Theme.apply/applyDialog; only background, surface and card colours.
+    <!-- Profile toolbar menu: slightly tighter horizontal action spacing, with a full-height touch target. -->
+    <style name="ThemeOverlay.SagerNet.ProfileMenu" parent="ThemeOverlay.AppCompat.DayNight">
+        <item name="actionButtonStyle">@style/Widget.SagerNet.ProfileActionButton</item>
+    </style>
+
+    <style name="Widget.SagerNet.ProfileActionButton" parent="Widget.AppCompat.ActionButton">
+        <item name="android:minWidth">44dp</item>
+        <item name="android:minHeight">48dp</item>
+    </style>
+
+    <!-- AMOLED black overlay: applied at night by Theme.apply/Theme.applyDialog; only background, surface and card colours.
          parent="" cuts the implicit dotted-name inheritance (Theme.SagerNet would be layered on and lock the colours) -->
     <style name="Theme.SagerNet.Amoled" parent="">
         <item name="android:windowBackground">@android:color/black</item>

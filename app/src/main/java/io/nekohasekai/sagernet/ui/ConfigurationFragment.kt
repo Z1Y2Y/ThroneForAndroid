@@ -213,7 +213,8 @@ class ConfigurationFragment : ToolbarFragment(R.layout.layout_group_list),
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         val config = resources.configuration
-        doubleColumn = !select && DataStore.groupLayoutMode == 1
+        // The picker uses the same profile cards and saved layout as the configuration screen.
+        doubleColumn = DataStore.groupLayoutMode == 1
         readProfileState()
 
         setUpToolbar()
