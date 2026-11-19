@@ -399,7 +399,7 @@ class GroupSettingsActivity : ThemedActivity(R.layout.layout_config_settings), O
             nameExclude = text(KEY_NAME_EXCLUDE),
             typeExclude = (SubscriptionNameFilter.PROTOCOLS.map { it.id } + unknownTypes).filter { it in ticked },
             countryFilter = countryFilter,
-            showInfoCard = store.getBoolean(KEY_SHOW_INFO_CARD, true),
+            showInfoCard = store.getBoolean(KEY_SHOW_INFO_CARD, false),
         )
     }
 

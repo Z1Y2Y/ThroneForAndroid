@@ -658,13 +658,13 @@
         <item name="primaryOrTextPrimary">?android:textColorPrimary</item>
     </style>
 
-    <!-- Profile toolbar menu: slightly tighter horizontal action spacing, with a full-height touch target. -->
+    <!-- Profile toolbar actions retain 48dp touch bounds; the profile screen moves only their icon drawables inward. -->
     <style name="ThemeOverlay.SagerNet.ProfileMenu" parent="ThemeOverlay.AppCompat.DayNight">
         <item name="actionButtonStyle">@style/Widget.SagerNet.ProfileActionButton</item>
     </style>
 
     <style name="Widget.SagerNet.ProfileActionButton" parent="Widget.AppCompat.ActionButton">
-        <item name="android:minWidth">44dp</item>
+        <item name="android:minWidth">48dp</item>
         <item name="android:minHeight">48dp</item>
     </style>
 

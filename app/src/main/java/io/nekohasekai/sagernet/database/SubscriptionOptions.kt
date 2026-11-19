@@ -114,8 +114,8 @@ data class SubscriptionOptions(
     var typeExclude: List<String> = emptyList(),
     /** The desktop's IP-test country filter ("HK,JP" keeps, "!RU" drops): carried, not applied on Android. */
     var countryFilter: String = "",
-    /** Android-only: the subscription info card above the profiles; stored only when off. */
-    var showInfoCard: Boolean = true,
+    /** Android-only: the subscription info card above the profiles; stored only when on. */
+    var showInfoCard: Boolean = false,
 ) : Parcelable {
 
     fun toJson(): JsonObject {
@@ -141,7 +141,7 @@ data class SubscriptionOptions(
         if (nameExclude.isNotEmpty()) json["name_exclude"] = nameExclude
         if (typeExclude.isNotEmpty()) json["type_exclude"] = JsonArray().also { a -> typeExclude.forEach { a.add(it) } }
         if (countryFilter.isNotEmpty()) json["country_filter"] = countryFilter
-        if (!showInfoCard) json["show_info_card"] = false
+        if (showInfoCard) json["show_info_card"] = true
         return json
     }
 
@@ -182,7 +182,7 @@ data class SubscriptionOptions(
                 nameExclude = json.string("name_exclude"),
                 typeExclude = typeIds(json.array("type_exclude").strings()),
                 countryFilter = json.string("country_filter"),
-                showInfoCard = !json.isBool("show_info_card") || json.bool("show_info_card"),
+                showInfoCard = json.bool("show_info_card"),
             )
         }
 

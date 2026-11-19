@@ -1,17 +1,23 @@
 package io.nekohasekai.sagernet.ui
 
 import android.content.Intent
+import android.graphics.Canvas
+import android.graphics.drawable.Drawable
+import android.graphics.drawable.DrawableWrapper
 import android.os.Bundle
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.MenuItem
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ImageView
 import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.DrawableRes
 import androidx.annotation.StringRes
+import androidx.appcompat.view.menu.ActionMenuItemView
+import androidx.appcompat.widget.ActionMenuView
 import androidx.appcompat.widget.SearchView
 import androidx.appcompat.widget.Toolbar
 import androidx.coordinatorlayout.widget.CoordinatorLayout
@@ -382,11 +388,82 @@ class ConfigurationFragment : ToolbarFragment(R.layout.layout_group_list),
                 if (!hasFocus && query.isEmpty()) clearSearch()
             }
         }
+        if (!select) compactProfileToolbarIconSpacing(toolbar)
         // a tap on the toolbar brings the selected profile into view (or goes back to the top)
         toolbar.setOnClickListener { currentList()?.scrollToProfile(pickedOrSelectedId()) }
         toolbar.setOnLongClickListener {
             showActiveProfile()
             true
+        }
+    }
+
+    /** Keep the five right-side profile actions at full touch size; only draw their icons closer together. */
+    private fun compactProfileToolbarIconSpacing(toolbar: Toolbar) {
+        val actionItemIds = setOf(R.id.action_add, R.id.action_test_url, R.id.action_test_speed, R.id.action_misc)
+        val refresh = Runnable {
+            val actionMenu = (0 until toolbar.childCount)
+                .map { toolbar.getChildAt(it) }
+                .filterIsInstance<ActionMenuView>()
+                .firstOrNull() ?: return@Runnable
+
+            val iconViews = mutableListOf<View>()
+            (toolbar.menu.findItem(R.id.action_search)?.actionView as? SearchView)
+                ?.findViewById<ImageView>(androidx.appcompat.R.id.search_button)
+                ?.takeIf { it.isVisible && it.drawable != null }
+                ?.let(iconViews::add)
+            (0 until actionMenu.childCount)
+                .map { actionMenu.getChildAt(it) }
+                .filterIsInstance<ActionMenuItemView>()
+                .filter { it.isVisible && it.itemData.itemId in actionItemIds }
+                .forEach(iconViews::add)
+
+            if (iconViews.size < 2) return@Runnable
+            iconViews.sortBy { view ->
+                val location = IntArray(2)
+                view.getLocationOnScreen(location)
+                location[0] + view.width / 2
+            }
+            val stepPx = (6f * toolbar.resources.displayMetrics.density).roundToInt()
+            val center = iconViews.lastIndex / 2f
+            iconViews.forEachIndexed { index, iconView ->
+                val offsetPx = ((center - index) * stepPx).roundToInt()
+                when (iconView) {
+                    is ActionMenuItemView -> {
+                        val icon = iconView.compoundDrawablesRelative[0]
+                            ?: iconView.compoundDrawables[0]
+                            ?: return@forEachIndexed
+                        val offsetIcon = icon as? ProfileToolbarIconDrawable
+                            ?: ProfileToolbarIconDrawable(icon).also { iconView.setIcon(it) }
+                        offsetIcon.setOffsetX(offsetPx)
+                    }
+                    is ImageView -> {
+                        val icon = iconView.drawable ?: return@forEachIndexed
+                        val offsetIcon = icon as? ProfileToolbarIconDrawable
+                            ?: ProfileToolbarIconDrawable(icon).also { iconView.setImageDrawable(it) }
+                        offsetIcon.setOffsetX(offsetPx)
+                    }
+                }
+            }
+        }
+        toolbar.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> toolbar.post(refresh) }
+        toolbar.post(refresh)
+    }
+
+    private class ProfileToolbarIconDrawable(drawable: Drawable) : DrawableWrapper(drawable) {
+        private var offsetX = 0
+
+        fun setOffsetX(value: Int) {
+            if (offsetX != value) {
+                offsetX = value
+                invalidateSelf()
+            }
+        }
+
+        override fun draw(canvas: Canvas) {
+            val save = canvas.save()
+            canvas.translate(offsetX.toFloat(), 0f)
+            super.draw(canvas)
+            canvas.restoreToCount(save)
         }
     }
 

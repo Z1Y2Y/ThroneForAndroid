@@ -65,7 +65,7 @@
             app:title="@string/grp_import_sub_route" />
 
         <SwitchPreference
-            app:defaultValue="true"
+            app:defaultValue="false"
             app:icon="@drawable/ic_device_data_usage"
             app:key="groupSubShowInfoCard"
             app:summary="@string/grp_show_info_card_tip"
